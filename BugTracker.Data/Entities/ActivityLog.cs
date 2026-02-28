@@ -95,9 +95,12 @@ namespace BugTracker.Data.Entities
         CommentEdited,
         CommentDeleted,
 
-        // Project/member actions
+        // Project actions
         ProjectCreated,
         ProjectUpdated,
+        ProjectArchived,
+
+        //member actions
         MemberInvited,
         MemberAdded,
         MemberRemoved,

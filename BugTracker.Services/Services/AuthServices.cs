@@ -33,9 +33,7 @@ namespace BugTracker.Services.Services
                 var email = request.Email;
 
                 // 1. Check if email is already taken
-                var existing = await _db.Users
-                    .Find(u => u.Email == email)
-                    .FirstOrDefaultAsync();
+                var existing = await _db.Users.Find(u => u.Email == email).FirstOrDefaultAsync();
 
                 if (existing != null)
                 {
@@ -94,14 +92,18 @@ namespace BugTracker.Services.Services
                 // 1. Find user by email
                 var user = await _db.Users.Find(u => u.Email == email).FirstOrDefaultAsync();
 
-                // Deliberately generic message — never reveal whether email exists
                 if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-                    throw new UnauthorizedAccessException("Invalid email or password.");
+                {
+                    Log.Information("Invalid Credentials inputed for email: {email}", request.Email);
+                    return new ApiResponse<AuthResponse>
+                    {
+                        ResponseCode = ResponseCodes.UnAuthorized.ResponseCode,
+                        ResponseMessage = "Invalid email or password."
+                    };
+                }
 
                 // 2. Update lastLoginAt
-                var update = Builders<User>.Update
-                    .Set(u => u.LastLoginAt, DateTime.UtcNow)
-                    .Set(u => u.UpdatedAt, DateTime.UtcNow);
+                var update = Builders<User>.Update.Set(u => u.LastLoginAt, DateTime.UtcNow).Set(u => u.UpdatedAt, DateTime.UtcNow);
 
                 await _db.Users.UpdateOneAsync(u => u.Id == user.Id, update);
 
@@ -119,7 +121,6 @@ namespace BugTracker.Services.Services
                     ResponseMessage = "An error occurred during login. Please try again later."
                 };
             }
-
         }
         
 

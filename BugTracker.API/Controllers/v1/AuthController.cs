@@ -7,7 +7,7 @@ namespace BugTracker.API.Controllers.v1
 {
     [ApiController]
     [ApiVersion("1.0")]
-    [Route("api/v{version:ApiVersion}/controller")]
+    [Route("api/v{version:ApiVersion}/[controller]")]
     public class AuthController : ControllerBase
     {
 

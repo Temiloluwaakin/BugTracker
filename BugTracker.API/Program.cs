@@ -59,6 +59,7 @@ builder.Services.AddScoped<DatabaseContext>();
 //services
 builder.Services.AddScoped<IAuthService, AuthServices>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
+builder.Services.AddScoped<IProjectService, ProjectServices>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 //api versioning
