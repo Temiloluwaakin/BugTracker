@@ -58,6 +58,15 @@ namespace BugTracker.Services.Services
                     };
                 }
 
+                if (!TryParseEnum<ProjectPriorities>(request.ProjectPriority, out var priority))
+                {
+                    return new ApiResponse<ProjectResponse>
+                    {
+                        ResponseCode = ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        ResponseMessage = $"Invalid project priority '{request.ProjectPriority}'."
+                    };
+                }
+
                 // 2. Sanitise inputs
                 var projectName = request.Name.Trim();
                 var tags = request.Tags?
@@ -77,15 +86,67 @@ namespace BugTracker.Services.Services
                     AddedBy = actor.Id   // owner added themselves
                 };
 
-                // 4. Build and insert the project document
+                var members = new List<ProjectMember> { ownerMember };
+
+                // 4. Process additional members
+                if (request.Members != null && request.Members.Any())
+                {
+                    var normalizedEmails = request.Members
+                        .Where(m => !string.IsNullOrWhiteSpace(m.Email))
+                        .Select(m => m.Email.Trim().ToLower())
+                        .Distinct()
+                        .ToList();
+
+                    var users = await _db.Users
+                        .Find(u => normalizedEmails.Contains(u.Email.ToLower()))
+                        .ToListAsync(token);
+
+                    foreach (var reqMember in request.Members)
+                    {
+                        var email = reqMember.Email.Trim().ToLower();
+
+                        var user = users.FirstOrDefault(u =>
+                            u.Email.ToLower() == email);
+
+                        if (user == null)
+                            continue;
+
+                        if (user.Id == actor.Id)
+                            continue;
+
+                        if (members.Any(m => m.UserId == user.Id))
+                            continue;
+
+                        if (!TryParseEnum<ProjectRole>(reqMember.Role, out var role))
+                        {
+                            Log.Warning("Invalid role '{Role}' supplied for {Email}", reqMember.Role, reqMember.Email);
+                            continue;
+                        }
+
+                        members.Add(new ProjectMember
+                        {
+                            UserId = user.Id,
+                            Email = user.Email,
+                            FullName = user.FullName,
+                            Role = role,
+                            JoinedAt = DateTime.UtcNow,
+                            AddedBy = actor.Id
+                        });
+                    }
+                }
+
+                // 5. Create project
                 var project = new Project
                 {
                     Name = projectName,
                     Description = request.Description?.Trim(),
                     OwnerId = actor.Id,
                     Status = ProjectStatus.Active,
-                    Members = new List<ProjectMember> { ownerMember },
+                    Members = members,
                     Tags = tags,
+                    ProjectStartDate = request.ProjectStartDate,
+                    ProjectDueDate = request.ProjectDueDate,
+                    ProjectPriority = priority,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -139,6 +200,9 @@ namespace BugTracker.Services.Services
                         Name = p.Name,
                         Description = p.Description,
                         Status = p.Status.ToString(),
+                        ProjectStartDate = p.ProjectStartDate,
+                        ProjectDueDate = p.ProjectDueDate,
+                        Priority = p.ProjectPriority.ToString(),
                         YourRole = myMember.Role.ToString(),
                         MemberCount = p.Members.Count,
                         Tags = p.Tags,
@@ -496,7 +560,6 @@ namespace BugTracker.Services.Services
 
         
         // UPDATE MEMBER ROLE
-        
         public async Task<ApiResponse<object>> UpdateMemberRoleAsync(
             string actorUserId,
             string projectId,
@@ -714,6 +777,10 @@ namespace BugTracker.Services.Services
         }
 
         
+
+
+
+        //--------------------------------------------------------
         // PRIVATE HELPERS     
 
         /// <summary>
@@ -778,6 +845,9 @@ namespace BugTracker.Services.Services
             Description = project.Description,
             OwnerId = project.OwnerId.ToString(),
             Status = project.Status.ToString(),
+            ProjectStartDate = project.ProjectStartDate,
+            ProjectDueDate = project.ProjectDueDate,
+            Priority = project.ProjectPriority.ToString(),
             Tags = project.Tags,
             Members = project.Members
                 .OrderBy(m => m.JoinedAt)
@@ -815,5 +885,10 @@ namespace BugTracker.Services.Services
             ResponseCode = ResponseCodes.SystemMalfunction.ResponseCode,
             ResponseMessage = "An unexpected error occurred. Please try again later."
         };
+
+        public static bool TryParseEnum<T>(string value, out T result) where T : struct
+        {
+            return Enum.TryParse(value, true, out result) && Enum.IsDefined(typeof(T), result);
+        }
     }
 }

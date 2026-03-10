@@ -21,6 +21,16 @@ namespace BugTracker.Data.Entities
         [BsonIgnoreIfNull]
         public string? Description { get; set; }
 
+
+        [BsonElement("projectStartDate")]
+        [BsonIgnoreIfNull]
+        public DateTime? ProjectStartDate { get; set; }
+
+
+        [BsonElement("projectDueDate")]
+        [BsonIgnoreIfNull]
+        public DateTime? ProjectDueDate { get; set; }
+
         /// <summary>
         /// The user who created the project. Denormalized from members for fast ownership queries.
         /// </summary>
@@ -31,6 +41,11 @@ namespace BugTracker.Data.Entities
         [BsonElement("status")]
         [BsonRepresentation(BsonType.String)]
         public ProjectStatus Status { get; set; } = ProjectStatus.Active;
+
+
+        [BsonElement("ProjectPriority")]
+        [BsonRepresentation(BsonType.String)]
+        public ProjectPriorities ProjectPriority { get; set; } = ProjectPriorities.Low;
 
         /// <summary>
         /// Embedded member roster. Each entry includes the user's role.
@@ -82,12 +97,22 @@ namespace BugTracker.Data.Entities
         public string AddedBy { get; set; } = string.Empty;
     }
 
+
     public enum ProjectStatus
     {
         Active,
         Archived,
         Completed
     }
+
+
+    public enum ProjectPriorities
+    {
+        Low,
+        Medium,
+        High
+    }
+
 
     public enum ProjectRole
     {

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using BugTracker.Data.Entities;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -7,9 +8,7 @@ using System.Threading.Tasks;
 
 namespace BugTracker.Data.Models
 {
-    // ─────────────────────────────────────────────
     // Create Project
-    // ─────────────────────────────────────────────
     public class CreateProjectRequest
     {
         [Required(ErrorMessage = "Project name is required.")]
@@ -21,11 +20,25 @@ namespace BugTracker.Data.Models
 
         /// <summary>Optional tags e.g. ["ios", "regression"]</summary>
         public List<string>? Tags { get; set; }
+        public DateTime? ProjectStartDate { get; set; }
+        public DateTime? ProjectDueDate { get; set; }
+        [Required]
+        public string ProjectPriority { get; set; } = ProjectPriorities.Low.ToString();
+
+        public List<CreateProjectMemberRequest>? Members { get; set; }
     }
 
-    // ─────────────────────────────────────────────
+    public class CreateProjectMemberRequest
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Role { get; set; } = string.Empty;
+    }
+
     // Update Project
-    // ─────────────────────────────────────────────
     public class UpdateProjectRequest
     {
         [StringLength(100, MinimumLength = 3, ErrorMessage = "Project name must be between 3 and 100 characters.")]
@@ -77,6 +90,9 @@ namespace BugTracker.Data.Models
         public string OwnerId { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public List<string> Tags { get; set; } = new();
+        public string Priority { get; set; } = string.Empty;
+        public DateTime? ProjectStartDate { get; set; }
+        public DateTime? ProjectDueDate { get; set; }
         public List<MemberResponse> Members { get; set; } = new();
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
@@ -90,6 +106,9 @@ namespace BugTracker.Data.Models
         public string Status { get; set; } = string.Empty;
         public string YourRole { get; set; } = string.Empty;   // the caller's role in this project
         public int MemberCount { get; set; }
+        public string Priority { get; set; }
+        public DateTime? ProjectStartDate { get; set; }
+        public DateTime? ProjectDueDate { get; set; }
         public List<string> Tags { get; set; } = new();
         public DateTime CreatedAt { get; set; }
     }
