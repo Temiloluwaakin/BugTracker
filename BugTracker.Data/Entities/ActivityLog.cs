@@ -81,6 +81,15 @@ namespace BugTracker.Data.Entities
         BugStatusChanged,
         BugAssigned,
         BugDeleted,
+        BugAttachmentAdded,
+        BugDeveloperStatusChanged,
+        BugDeveloperUnassigned,
+        BugDeveloperAssigned,
+        BugTesterReassigned,
+        BugTesterCommentEdited,
+        BugTesterCommentAdded,
+        BugDeveloperCommentAdded,
+        BugDeveloperCommentEdited,
 
         // Test case actions
         TestCaseCreated,

@@ -123,6 +123,9 @@ namespace BugTracker.Data.Entities
         Tester,
 
         /// <summary>Read-only access to everything in the project.</summary>
-        Viewer
+        Viewer,
+
+        /// <summary>Can edit the developer status and comment</summary>
+        Developer,
     }
 }

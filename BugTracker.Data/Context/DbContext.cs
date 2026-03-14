@@ -108,9 +108,9 @@ namespace BugTracker.Data.Context
                     .Ascending(b => b.Status),
                 new CreateIndexOptions { Name = "idx_bugs_projectId_status" }));
 
-            Bugs.Indexes.CreateOne(new CreateIndexModel<Bug>(
-                Builders<Bug>.IndexKeys.Ascending(b => b.AssignedTo),
-                new CreateIndexOptions { Name = "idx_bugs_assignedTo" }));
+            //Bugs.Indexes.CreateOne(new CreateIndexModel<Bug>(
+            //    Builders<Bug>.IndexKeys.Ascending(b => b.AssignedTesterId),
+            //    new CreateIndexOptions { Name = "idx_bugs_assignedTo" }));
 
             // testcases
             TestCases.Indexes.CreateOne(new CreateIndexModel<TestCase>(

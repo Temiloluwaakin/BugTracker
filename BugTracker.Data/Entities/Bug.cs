@@ -30,7 +30,7 @@ namespace BugTracker.Data.Entities
         public string Description { get; set; } = string.Empty;
 
         [BsonElement("stepsToReproduce")]
-        public List<string> StepsToReproduce { get; set; } = new();
+        public string StepsToReproduce { get; set; } =string.Empty;
 
         [BsonElement("expectedBehavior")]
         [BsonIgnoreIfNull]
@@ -52,6 +52,11 @@ namespace BugTracker.Data.Entities
         [BsonRepresentation(BsonType.String)]
         public BugStatus Status { get; set; } = BugStatus.Open;
 
+        
+        [BsonElement("developerStatus")]
+        [BsonRepresentation(BsonType.String)]
+        public DevelopersStatus? DeveloperStatus { get; set; }
+
         /// <summary>
         /// E.g. "iOS 17.2 / iPhone 14 / Safari 17"
         /// </summary>
@@ -66,15 +71,62 @@ namespace BugTracker.Data.Entities
         [BsonIgnoreIfNull]
         public string? Version { get; set; }
 
-        [BsonElement("reportedBy")]
-        [BsonRepresentation(BsonType.ObjectId)]
-        public string ReportedBy { get; set; } = string.Empty;
 
-        /// <summary>
-        /// One or more testers assigned to investigate or fix this bug.
-        /// </summary>
-        [BsonElement("assignedTo")]
-        public List<string> AssignedTo { get; set; } = new();
+        // REPORTER — the tester who filed the bug.
+        [BsonElement("reportedById")]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId ReportedById { get; set; }
+
+        [BsonElement("reportedByName")]
+        public string ReportedByName { get; set; } = string.Empty;
+
+        [BsonElement("reportedByEmail")]
+        public string ReportedByEmail { get; set; } = string.Empty;
+
+
+        // ASSIGNED TESTER — starts as the reporter.
+        // Can be reassigned by the owner or the current assigned tester.
+        // Only this person (or the owner) can change the main bug status.
+        [BsonElement("assignedTesterId")]
+        [BsonIgnoreIfNull]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId? AssignedTesterId { get; set; }
+
+        [BsonElement("assignedTesterName")]
+        [BsonIgnoreIfNull]
+        public string? AssignedTesterName { get; set; }
+
+        [BsonElement("assignedTesterEmail")]
+        [BsonIgnoreIfNull]
+        public string? AssignedTesterEmail { get; set; }
+
+
+        // ASSIGNED DEVELOPER — must have the 'developer' role.
+        // Only this person can update developerStatus and the developer comment.
+        // ─────────────────────────────────────────────
+        [BsonElement("assignedDeveloperId")]
+        [BsonIgnoreIfNull]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId? AssignedDeveloperId { get; set; }
+
+        [BsonElement("assignedDeveloperName")]
+        [BsonIgnoreIfNull]
+        public string? AssignedDeveloperName { get; set; }
+
+        [BsonElement("assignedDeveloperEmail")]
+        [BsonIgnoreIfNull]
+        public string? AssignedDeveloperEmail { get; set; }
+
+
+        //editable comments per role, tester or developer
+        [BsonElement("testerComment")]
+        [BsonIgnoreIfNull]
+        public EmbeddedComment? TesterComment { get; set; }
+
+        [BsonElement("developerComment")]
+        [BsonIgnoreIfNull]
+        public EmbeddedComment? DeveloperComment { get; set; }
+
 
         [BsonElement("attachments")]
         public List<BugAttachment> Attachments { get; set; } = new();
@@ -93,10 +145,10 @@ namespace BugTracker.Data.Entities
         /// <summary>
         /// If this bug is a duplicate, points to the original bug's Id.
         /// </summary>
-        [BsonElement("duplicateOf")]
-        [BsonRepresentation(BsonType.ObjectId)]
+        [BsonElement("duplicateOfId")]
         [BsonIgnoreIfNull]
-        public string? DuplicateOf { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId? DuplicateOfId { get; set; }
 
         /// <summary>
         /// Lightweight audit trail of every status change on this bug.
@@ -109,6 +161,8 @@ namespace BugTracker.Data.Entities
         [BsonIgnoreIfNull]
         public DateTime? ResolvedAt { get; set; }
     }
+
+
 
     public class BugAttachment
     {
@@ -135,6 +189,8 @@ namespace BugTracker.Data.Entities
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     }
 
+
+
     public class BugStatusHistory
     {
         [BsonElement("fromStatus")]
@@ -160,6 +216,38 @@ namespace BugTracker.Data.Entities
         public string? Comment { get; set; }
     }
 
+    // EMBEDDED COMMENT
+    // Shared shape for both TesterComment and DeveloperComment.
+    // Single instance per bug per role — overwritten on edit.
+    public class EmbeddedComment
+    {
+        [BsonElement("authorId")]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId AuthorId { get; set; }
+
+        [BsonElement("authorName")]
+        public string AuthorName { get; set; } = string.Empty;
+
+        [BsonElement("content")]
+        public string Content { get; set; } = string.Empty;
+
+        /// <summary>
+        /// False on first write. Flips to true on any subsequent overwrite.
+        /// </summary>
+        [BsonElement("isEdited")]
+        public bool IsEdited { get; set; } = false;
+
+        /// <summary>Set once on first write. Preserved on all subsequent edits.</summary>
+        [BsonElement("createdAt")]
+        public DateTime CreatedAt { get; set; }
+
+        /// <summary>Updated on every write including the first.</summary>
+        [BsonElement("updatedAt")]
+        public DateTime UpdatedAt { get; set; }
+    }
+
+
+
     public enum BugSeverity
     {
         /// <summary>System crash, data loss, security breach — blocks all work.</summary>
@@ -175,6 +263,8 @@ namespace BugTracker.Data.Entities
         Low
     }
 
+
+
     public enum BugPriority
     {
         /// <summary>Fix immediately — must go in next release.</summary>
@@ -187,14 +277,30 @@ namespace BugTracker.Data.Entities
         Low
     }
 
+
+
     public enum BugStatus
     {
+        none,
         Open,
         InProgress,
         Resolved,
         Closed,
         WontFix,
         Duplicate
+    }
+
+
+
+    public enum DevelopersStatus
+    {
+        none,
+        NotAssigned,
+        NotStarted,
+        Ongoing,
+        Blocked,
+        Fixed,
+        NotABug
     }
 
 }

@@ -3,12 +3,14 @@ using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using MongoDB.Bson;
+using MongoDB.Bson.IO;
 using MongoDB.Driver;
 using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace BugTracker.Services.Services
@@ -32,8 +34,8 @@ namespace BugTracker.Services.Services
         private readonly DatabaseContext _db;
 
         private static readonly HashSet<string> ValidProjectStatuses = new() { "active", "archived", "completed" };
-        private static readonly HashSet<string> ValidInviteRoles = new() { "tester", "viewer" };
-        private static readonly HashSet<string> ValidUpdateRoles = new() { "tester", "viewer" };
+        private static readonly HashSet<string> ValidInviteRoles = new() { "tester", "viewer", "developer"};
+        private static readonly HashSet<string> ValidUpdateRoles = new() { "tester", "viewer", "developer" };
 
         public ProjectServices(DatabaseContext db)
         {
@@ -46,6 +48,8 @@ namespace BugTracker.Services.Services
         {
             try
             {
+                Log.Information("about to create a project by user: {actoruserid} with request {request}", actorUserId, request);
+
                 // 1. Resolve the acting user — we need their display info for the members embed
                 var actor = await _db.Users.Find(u => u.Id == actorUserId).FirstOrDefaultAsync(token);
                 if (actor is null)
@@ -60,6 +64,7 @@ namespace BugTracker.Services.Services
 
                 if (!TryParseEnum<ProjectPriorities>(request.ProjectPriority, out var priority))
                 {
+                    Log.Warning("invalid project priority detected");
                     return new ApiResponse<ProjectResponse>
                     {
                         ResponseCode = ResponseCodes.InvalidEntryDetected.ResponseCode,
@@ -176,8 +181,12 @@ namespace BugTracker.Services.Services
         }
 
         
-        // GET MY PROJECTS
-        
+        /// <summary>
+        /// get the project summary a logged in user belongs to
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<List<ProjectSummaryResponse>>> GetMyProjectsAsync(string actorUserId, CancellationToken token)
         {
             try
@@ -220,7 +229,13 @@ namespace BugTracker.Services.Services
         }
 
         
-        // GET PROJECT BY ID
+        /// <summary>
+        /// get projects by id
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<ProjectResponse>> GetProjectByIdAsync(string actorUserId, string projectId, CancellationToken token)
         {
             try
@@ -255,7 +270,14 @@ namespace BugTracker.Services.Services
         }
 
         
-        // UPDATE PROJECT
+        /// <summary>
+        /// to update a project
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<ProjectResponse>> UpdateProjectAsync(
             string actorUserId,
             string projectId,
@@ -413,8 +435,14 @@ namespace BugTracker.Services.Services
         }
 
         
-        // INVITE MEMBER
-        
+        /// <summary>
+        /// to invite member to a oriject either owner, tester, viewer or developer
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<object>> InviteMemberAsync(
             string actorUserId,
             string projectId,
@@ -559,7 +587,15 @@ namespace BugTracker.Services.Services
         }
 
         
-        // UPDATE MEMBER ROLE
+        /// <summary>
+        /// to update a members role for a project
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="targetUserId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<object>> UpdateMemberRoleAsync(
             string actorUserId,
             string projectId,
@@ -656,7 +692,14 @@ namespace BugTracker.Services.Services
         }
 
         
-        // REMOVE MEMBER
+        /// <summary>
+        /// to remove a member from a project
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="targetUserId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         public async Task<ApiResponse<object>> RemoveMemberAsync(
             string actorUserId,
             string projectId,
@@ -728,8 +771,15 @@ namespace BugTracker.Services.Services
             }
         }
 
-        
-        // GET MEMBERS        
+
+        /// <summary>
+        /// to get all members of a project the logged in user is part of
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="targetUserId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>      
         public async Task<ApiResponse<List<MemberResponse>>> GetMembersAsync(
             string actorUserId,
             string projectId,
