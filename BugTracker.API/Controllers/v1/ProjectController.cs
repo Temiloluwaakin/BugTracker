@@ -254,5 +254,52 @@ namespace BugTracker.API.Controllers.v1
             var result = await _projectService.GetMembersAsync(userId, projectId, token);
             return Ok(result);
         }
+
+
+        /// <summary>
+        /// List all members of a project.
+        /// Any project member can call this.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        [HttpGet("{projectId}/activities")]
+        public async Task<IActionResult> GetActivities(
+            string projectId,
+            int page,
+            int pageSize,
+            CancellationToken token)
+        {
+            var userId = GetCurrentUserId();
+            if (userId is null)
+                return Unauthorized(new ApiResponse<object>
+                {
+                    ResponseCode = ResponseCodes.UnAuthorized.ResponseCode,
+                    ResponseMessage = "User identity could not be resolved."
+                });
+
+            var result = await _projectService.GetActivitiesAsync(userId, projectId, page, pageSize, token);
+            return Ok(result);
+        }
+
+
+
+        [HttpGet("{projectId}/metrics")]
+        public async Task<IActionResult> GetMetrics(
+            string projectId,
+            CancellationToken token)
+        {
+            var userId = GetCurrentUserId();
+            if (userId is null)
+                return Unauthorized(new ApiResponse<object>
+                {
+                    ResponseCode = ResponseCodes.UnAuthorized.ResponseCode,
+                    ResponseMessage = "User identity could not be resolved."
+                });
+
+            var result = await _projectService.GetProjectMetricsAsync(userId, projectId, token);
+            return Ok(result);
+        }
+
     }
 }

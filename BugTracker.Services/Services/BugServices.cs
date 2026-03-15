@@ -35,7 +35,7 @@ namespace BugTracker.Services.Services
 
         private static readonly HashSet<string> ValidSeverities = new() { "critical", "high", "medium", "low" };
         private static readonly HashSet<string> ValidPriorities = new() { "urgent", "normal", "low" };
-        private static readonly HashSet<string> ValidBugStatuses = new() { "none", "open", "inprogress", "resolved", "closed", "wontfix", "duplicate" };
+        private static readonly HashSet<string> ValidBugStatuses = new() { "none", "open", "inprogress", "closed", "wontfix", "duplicate" };
         private static readonly HashSet<string> ValidDeveloperStatuses = new() { "none", "notassigned", "notstarted", "ongoing", "blocked", "fixed", "notabug" };
         
 
@@ -1077,7 +1077,7 @@ namespace BugTracker.Services.Services
                     return Fail<object>(ResponseCodes.UnAuthorized.ResponseCode,
                         "Only the project owner or the original bug reporter can delete this bug.");
 
-                if (bug.Status is BugStatus.Resolved or BugStatus.Closed)
+                if (bug.Status is BugStatus.Closed)
                     return Fail<object>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         $"A '{bug.Status}' bug cannot be deleted. Archive the project if you want to remove all data.");
 

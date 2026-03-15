@@ -61,6 +61,8 @@ builder.Services.AddScoped<IAuthService, AuthServices>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IProjectService, ProjectServices>();
 builder.Services.AddScoped<IBugService, BugService>();
+builder.Services.AddScoped<IUserService, UserServices>();
+builder.Services.AddScoped<IResponseHelper, ResponseHelper>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 //api versioning
@@ -167,7 +169,7 @@ app.UseSwaggerUI(options =>
     foreach (var description in provider.ApiVersionDescriptions)
     {
         options.SwaggerEndpoint($"{description.GroupName}/swagger.json",
-            $"Community League API {description.GroupName.ToUpperInvariant()}");
+            $"Bug Tracker API {description.GroupName.ToUpperInvariant()}");
     }
 });
 

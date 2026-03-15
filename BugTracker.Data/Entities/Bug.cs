@@ -284,7 +284,6 @@ namespace BugTracker.Data.Entities
         none,
         Open,
         InProgress,
-        Resolved,
         Closed,
         WontFix,
         Duplicate

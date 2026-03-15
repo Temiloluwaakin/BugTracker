@@ -3,15 +3,8 @@ using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using MongoDB.Bson;
-using MongoDB.Bson.IO;
 using MongoDB.Driver;
 using Serilog;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.Json.Serialization;
-using System.Threading.Tasks;
 
 namespace BugTracker.Services.Services
 {
@@ -26,6 +19,8 @@ namespace BugTracker.Services.Services
         Task<ApiResponse<object>> UpdateMemberRoleAsync(string actorUserId, string projectId, string targetUserId, UpdateMemberRoleRequest request, CancellationToken token);
         Task<ApiResponse<object>> RemoveMemberAsync(string actorUserId, string projectId, string targetUserId, CancellationToken token);
         Task<ApiResponse<List<MemberResponse>>> GetMembersAsync(string actorUserId, string projectId, CancellationToken token);
+        Task<ApiResponse<PagedActivityRss>> GetActivitiesAsync(string actorUserId, string projectId, int page, int pageSize, CancellationToken token);
+        Task<ApiResponse<BugMetricsResponse>> GetProjectMetricsAsync(string actorUserId, string projectId, CancellationToken token);
     }
 
 
@@ -196,7 +191,7 @@ namespace BugTracker.Services.Services
 
                 // Compound index on members.userId will serve this query efficiently
                 var projects = await _db.Projects
-                    .Find(p => p.Members.Any(m => m.UserId == actorUserId))
+                    .Find(p => p.Members.Any(m => m.UserId == actorUserId) && p.Status != ProjectStatus.Archived)
                     .SortByDescending(p => p.CreatedAt)
                     .ToListAsync(token);
 
@@ -826,7 +821,209 @@ namespace BugTracker.Services.Services
             }
         }
 
-        
+
+        /// <summary>
+        /// To get the activities that has occured in a project
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="page"></param>
+        /// <param name="pageSize"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public async Task<ApiResponse<PagedActivityRss>> GetActivitiesAsync(
+            string actorUserId,
+            string projectId,
+            int page,
+            int pageSize,
+            CancellationToken token)
+        {
+            try
+            {
+                if (!ObjectId.TryParse(actorUserId, out _))
+                    return Fail<PagedActivityRss>(
+                        ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        "Invalid user ID format.");
+
+                if (!ObjectId.TryParse(projectId, out _))
+                    return Fail<PagedActivityRss> (
+                        ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        "Invalid project ID format.");
+
+                if (page <= 0) page = 1;
+                if (pageSize <= 0) pageSize = 20;
+
+                var project = await _db.Projects
+                    .Find(p => p.Id == projectId)
+                    .FirstOrDefaultAsync(token);
+
+                if (project is null)
+                    return Fail<PagedActivityRss>(
+                        ResponseCodes.NoRecordReturned.ResponseCode,
+                        "Project not found.");
+
+                // Any project member can see activities
+                var isMember = project.Members.Any(m => m.UserId == actorUserId);
+                if (!isMember)
+                    return Fail<PagedActivityRss>(
+                        ResponseCodes.UnAuthorized.ResponseCode,
+                        "You are not a member of this project.");
+
+                var filter = Builders<ActivityLog>.Filter.Eq(a => a.ProjectId, projectId);
+
+                var totalCount = await _db.ActivityLogs.CountDocumentsAsync(filter, cancellationToken: token);
+
+                var activities = await _db.ActivityLogs
+                    .Find(filter)
+                    .SortByDescending(a => a.CreatedAt)
+                    .Skip((page - 1) * pageSize)
+                    .Limit(pageSize)
+                    .ToListAsync(token);
+
+                var responseData = activities.Select(a => new ActivityResponse
+                {
+                    Id = a.Id,
+                    ActorId = a.ActorId,
+                    ActorName = a.ActorName,
+                    Action = a.Action.ToString(),
+                    EntityType = a.EntityType.ToString(),
+                    EntityId = a.EntityId,
+                    EntityTitle = a.EntityTitle,
+                    Metadata = a.Metadata,
+                    CreatedAt = a.CreatedAt
+                }).ToList();
+
+                var result = new PagedActivityRss
+                {
+                    Activities = responseData,
+                    Page = page,
+                    PageSize = pageSize,
+                    TotalCount = totalCount
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex,
+                    "Error fetching activities for project {ProjectId} by user {UserId}.",
+                    projectId,
+                    actorUserId);
+
+                return SystemError<PagedActivityRss>();
+            }
+        }
+
+
+
+        /// <summary>
+        /// to get metrics for a project a logged in user belongs to
+        /// </summary>
+        /// <param name="actorUserId"></param>
+        /// <param name="projectId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public async Task<ApiResponse<BugMetricsResponse>> GetProjectMetricsAsync(
+            string actorUserId,
+            string projectId,
+            CancellationToken token)
+        {
+            try
+            {
+                if (!ObjectId.TryParse(actorUserId, out var actorObjId))
+                    return Fail<BugMetricsResponse>(
+                        ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        "Invalid user ID format.");
+
+                if (!ObjectId.TryParse(projectId, out var projectObjId))
+                    return Fail<BugMetricsResponse>(
+                        ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        "Invalid project ID format.");
+
+                // Verify project + membership
+                var project = await _db.Projects
+                    .Find(p => p.Id == projectId)
+                    .FirstOrDefaultAsync(token);
+
+                if (project is null)
+                    return Fail<BugMetricsResponse>(
+                        ResponseCodes.NoRecordReturned.ResponseCode,
+                        "Project not found.");
+
+                if (!project.Members.Any(m => m.UserId == actorUserId))
+                    return Fail<BugMetricsResponse>(
+                        ResponseCodes.UnAuthorized.ResponseCode,
+                        "You are not a member of this project.");
+
+                // Aggregate bug counts by status
+                var results = await _db.Bugs.Aggregate()
+                    .Match(b => b.ProjectId == projectId)
+                    .Group(
+                        b => b.Status,
+                        g => new
+                        {
+                            Status = g.Key,
+                            Count = g.Count()
+                        })
+                    .ToListAsync(token);
+
+                int open = 0;
+                int inProgress = 0;
+                int closed = 0;
+                int wontFix = 0;
+                int duplicate = 0;
+
+                foreach (var item in results)
+                {
+                    switch (item.Status)
+                    {
+                        case BugStatus.Open:
+                            open = item.Count;
+                            break;
+
+                        case BugStatus.InProgress:
+                            inProgress = item.Count;
+                            break;
+
+                        case BugStatus.Closed:
+                            closed = item.Count;
+                            break;
+
+                        case BugStatus.WontFix:
+                            wontFix = item.Count;
+                            break;
+
+                        case BugStatus.Duplicate:
+                            duplicate = item.Count;
+                            break;
+                    }
+                }
+
+                var totalBugs = open + inProgress + closed + wontFix + duplicate;
+
+                var completion = totalBugs == 0
+                    ? 0
+                    : Math.Round((double)closed / totalBugs * 100, 2);
+
+                var response = new BugMetricsResponse
+                {
+                    TotalBugs = totalBugs,
+                    Open = open,
+                    InProgress = inProgress,
+                    Closed = closed,
+                    WontFix = wontFix,
+                    Duplicate = duplicate,
+                    CompletionPercentage = completion
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Error fetching bug metrics for project {ProjectId}", projectId);
+                return SystemError<BugMetricsResponse>();
+            }
+        }
 
 
 

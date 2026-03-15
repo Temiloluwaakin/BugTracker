@@ -296,4 +296,17 @@ namespace BugTracker.Data.Models
         public int PageSize { get; set; }
         public int TotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
     }
+
+    public class BugMetricsResponse
+    {
+        public int TotalBugs { get; set; }
+
+        public int Open { get; set; }
+        public int InProgress { get; set; }
+        public int Closed { get; set; }
+        public int WontFix { get; set; }
+        public int Duplicate { get; set; }
+
+        public double CompletionPercentage { get; set; }
+    }
 }
