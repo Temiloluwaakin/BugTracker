@@ -1,7 +1,6 @@
-using System.Reflection;
-using System.Text;
 using Asp.Versioning;
 using Asp.Versioning.ApiExplorer;
+using BugTracker.API.Hubs;
 using BugTracker.Data;
 using BugTracker.Data.Context;
 using BugTracker.Services.Helpers;
@@ -16,6 +15,8 @@ using Serilog.Events;
 using Serilog.Exceptions;
 using Serilog.Exceptions.Core;
 using Serilog.Exceptions.EntityFrameworkCore.Destructurers;
+using System.Reflection;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,7 +63,9 @@ builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IProjectService, ProjectServices>();
 builder.Services.AddScoped<IBugService, BugService>();
 builder.Services.AddScoped<IUserService, UserServices>();
+builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IResponseHelper, ResponseHelper>();
+builder.Services.AddScoped<IChatService, ChatServices>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 //api versioning
@@ -79,13 +82,13 @@ builder.Services.AddApiVersioning(
       options.GroupNameFormat = "'v'VVV";
       options.SubstituteApiVersionInUrl = true;
   });
-
 builder.Services.AddSwaggerGen(options =>
 {
     var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     options.IncludeXmlComments(xmlPath);
 });
+builder.Services.AddSignalR();// Register SignalR
 
 
 //port for render
@@ -94,25 +97,26 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 //CORS
 var _allowSpecificOrigins = "_myAllowSpecificOrigins";
-var allPermittedOrigins = builder.Configuration.GetSection("CORSConfig:AllowedDomains").Get<List<string>>();
+var allPermittedOrigins = builder.Configuration.GetSection("CORSConfig:AllowedDomains").Get<List<string>>() ?? new List<string>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(name: _allowSpecificOrigins,
                       policy =>
                       {
-                          policy.WithOrigins(allPermittedOrigins.ToArray());
+                          //policy.WithOrigins(allPermittedOrigins.ToArray());
+                          policy.SetIsOriginAllowed(origin =>
+                            allPermittedOrigins.Contains(origin) || origin == "null" || string.IsNullOrEmpty(origin)
+                          );
                           policy.AllowAnyMethod();
                           policy.AllowCredentials();
                           policy.AllowAnyHeader();
                       });
 });
-
-
+// auth jwt
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         var jwtKey = builder.Configuration.GetSection("Jwt:key").Value;
-
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -126,8 +130,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             RequireExpirationTime = true,
             RequireSignedTokens = true
         };
-
-        // Add event handlers for debugging
+        // event handlers for debugging
         options.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = context =>
@@ -148,22 +151,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             {
                 Log.Information("JWT Token validated successfully");
                 return Task.CompletedTask;
+            },
+            // websocket signalr reads the token from query string for SignalR WebSocket connections
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                // Only apply to SignalR hub requests
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
             }
         };
     });
-
 builder.Services.AddAuthorization();
+
 
 var app = builder.Build();
 
 
 //Resolve IApiVersionDescriptionProvider
 var provider = app.Services.GetRequiredService<IApiVersionDescriptionProvider>();
-
-
 // Configure Swagger UI with version info
 app.UseSwagger();
-
 app.UseSwaggerUI(options =>
 {
     foreach (var description in provider.ApiVersionDescriptions)
@@ -172,7 +186,6 @@ app.UseSwaggerUI(options =>
             $"Bug Tracker API {description.GroupName.ToUpperInvariant()}");
     }
 });
-
 // Register Swagger docs for each version
 app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions>>().Value.SwaggerGeneratorOptions.SwaggerDocs.Clear();
 foreach (var description in provider.ApiVersionDescriptions)
@@ -184,8 +197,10 @@ foreach (var description in provider.ApiVersionDescriptions)
 
 
 app.UseHttpsRedirection();
+app.UseCors("_myAllowSpecificOrigins");
 app.UseAuthentication(); // Must come before UseAuthorization
 app.UseAuthorization();
+app.MapHub<ChatHub>("/hubs/chat");   // This is the WebSocket endpoint the client connects to
 app.MapControllers();
 app.Run();
 

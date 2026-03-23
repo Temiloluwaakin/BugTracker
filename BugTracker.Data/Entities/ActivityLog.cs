@@ -95,9 +95,13 @@ namespace BugTracker.Data.Entities
         TestCaseCreated,
         TestCaseUpdated,
         TestCaseDeleted,
+        TestCaseStatusChanged,
+        TestCaseAssigned,
 
         // Test run actions
         TestRunLogged,
+        TestRunBugLinked,
+        TestRunDeleted,
 
         // Comment actions
         CommentAdded,

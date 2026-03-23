@@ -150,6 +150,7 @@ namespace BugTracker.Data.Entities
         [BsonRepresentation(BsonType.ObjectId)]
         public ObjectId? DuplicateOfId { get; set; }
 
+
         /// <summary>
         /// Lightweight audit trail of every status change on this bug.
         /// Append-only — never remove entries.

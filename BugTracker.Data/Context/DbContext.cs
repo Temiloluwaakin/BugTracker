@@ -51,6 +51,8 @@ namespace BugTracker.Data.Context
         public IMongoCollection<Counter> Counters =>
             _database.GetCollection<Counter>("counters");
 
+        public IMongoCollection<ChatMessage> ChatMessages =>
+            _database.GetCollection<ChatMessage>("chatMessages");
 
 
 
@@ -143,6 +145,7 @@ namespace BugTracker.Data.Context
                     .Ascending(a => a.ProjectId)
                     .Descending(a => a.CreatedAt),
                 new CreateIndexOptions { Name = "idx_activityLogs_projectId_createdAt" }));
+
         }
     }
 }

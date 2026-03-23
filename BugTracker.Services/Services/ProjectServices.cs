@@ -509,7 +509,7 @@ namespace BugTracker.Services.Services
                         UserId = existingUser.Id,
                         Email = existingUser.Email,
                         FullName = existingUser.FullName,
-                        Role = role == "tester" ? ProjectRole.Tester : ProjectRole.Viewer,
+                        Role = role == "tester" ? ProjectRole.Tester : role == "developer" ? ProjectRole.Developer : ProjectRole.Viewer,
                         JoinedAt = DateTime.UtcNow,
                         AddedBy = actorUserId
                     };
