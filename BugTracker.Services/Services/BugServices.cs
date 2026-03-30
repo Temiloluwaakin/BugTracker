@@ -5,11 +5,7 @@ using BugTracker.Data.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Serilog;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace BugTracker.Services.Services
 {
@@ -23,8 +19,9 @@ namespace BugTracker.Services.Services
         Task<ApiResponse<BugResponse>> UpdateDeveloperStatusAsync(string actorUserId, string projectId, string bugId, UpdateDeveloperStatusRequest request, CancellationToken token);
         Task<ApiResponse<BugResponse>> AssignDeveloperAsync(string actorUserId, string projectId, string bugId, AssignDeveloperRequest request, CancellationToken token);
         Task<ApiResponse<BugResponse>> ReassignTesterAsync(string actorUserId, string projectId, string bugId, ReassignTesterRequest request, CancellationToken token);
-        Task<ApiResponse<BugResponse>> UpsertTesterCommentAsync(string actorUserId, string projectId, string bugId, UpsertTesterCommentRequest request, CancellationToken token);
-        Task<ApiResponse<BugResponse>> UpsertDeveloperCommentAsync(string actorUserId, string projectId, string bugId, UpsertDeveloperCommentRequest request, CancellationToken token);
+        //Task<ApiResponse<BugResponse>> UpsertTesterCommentAsync(string actorUserId, string projectId, string bugId, UpsertTesterCommentRequest request, CancellationToken token);
+        //Task<ApiResponse<BugResponse>> UpsertDeveloperCommentAsync(string actorUserId, string projectId, string bugId, UpsertDeveloperCommentRequest request, CancellationToken token);
+        Task<ApiResponse<bool>> AddCommentAsync(string actorUserId, string projectId, string bugId, AddCommentRequest request, CancellationToken token);
         Task<ApiResponse<BugResponse>> AddAttachmentAsync(string actorUserId, string projectId, string bugId, AddAttachmentRequest request, CancellationToken token);
         Task<ApiResponse<object>> DeleteBugAsync(string actorUserId, string projectId, string bugId, CancellationToken token);
     }
@@ -177,8 +174,7 @@ namespace BugTracker.Services.Services
                             Comment     = "Bug created."
                         }
                     },
-                    TesterComment = null,
-                    DeveloperComment = null,
+                    Comments = null,
                     CreatedAt = now,
                     UpdatedAt = now
                 };
@@ -335,7 +331,23 @@ namespace BugTracker.Services.Services
                 if (memberError is not null) return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
                 if (project is null || bug is null) return Fail<BugResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
 
-                return Ok(MapToBugResponse(bug));
+                var comments = await _db.Comments
+                    .Find(c => c.EntityType == CommentEntityType.Bug && c.EntityId == bugId)
+                    .SortByDescending(c => c.CreatedAt)
+                    .ToListAsync(token);
+
+                var response = MapToBugResponse(bug);
+
+                response.Comments = comments.Select(c => new BugCommentResponse
+                {
+                    Id = c.Id.ToString(),
+                    AuthorId = c.AuthorId,
+                    Content = c.Content,
+                    IsEdited = c.IsEdited,
+                    CreatedAt = c.CreatedAt
+                }).ToList();
+
+                return Ok(response);
             }
             catch (Exception ex)
             {
@@ -630,7 +642,7 @@ namespace BugTracker.Services.Services
                 var updates = new List<UpdateDefinition<Bug>>
                 {
                     Builders<Bug>.Update.Set(b => b.DeveloperStatus, devStatus),
-                    Builders<Bug>.Update.Set(b => b.DeveloperComment, newComment),
+                    //Builders<Bug>.Update.Set(b => b.DeveloperComment, newComment),
                     Builders<Bug>.Update.Set(b => b.UpdatedAt, DateTime.UtcNow)
                 };
 
@@ -859,135 +871,175 @@ namespace BugTracker.Services.Services
 
 
 
-
-        // ═══════════════════════════════════════════
-        // UPSERT TESTER COMMENT
-        // Only the assigned tester or the original reporter.
-        // Overwrites the single tester comment on the bug.
-        // ═══════════════════════════════════════════
-        public async Task<ApiResponse<BugResponse>> UpsertTesterCommentAsync(
+        public async Task<ApiResponse<bool>> AddCommentAsync(
             string actorUserId,
             string projectId,
             string bugId,
-            UpsertTesterCommentRequest request,
+            AddCommentRequest request,
             CancellationToken token)
         {
             try
             {
                 var (valid, actorObjId, projectObjId, bugObjId, error) = ParseIds(actorUserId, projectId, bugId);
-                if (!valid) return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, error!);
+                if (!valid) return Fail<bool>(ResponseCodes.InvalidEntryDetected.ResponseCode, error!);
 
                 var (project, bug, memberError) = await FetchProjectAndBugAsync(projectObjId, bugObjId, actorObjId, token);
-                if (memberError is not null) return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
-                if (project is null || bug is null) return Fail<BugResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
+                if (memberError is not null) return Fail<bool>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
+                if (project is null || bug is null) return Fail<bool>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
 
-                // Only assigned tester or reporter can write the tester comment
-                var canComment = bug.AssignedTesterId == actorObjId || bug.ReportedById == actorObjId;
-                if (!canComment)
-                    return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode,
-                        "Only the assigned tester or the original reporter can write the tester comment on this bug.");
+                var member = project.Members.First(m => m.UserId == actorUserId);
 
-                var callerMember = project.Members.First(m => m.UserId == actorUserId);
-                var now = DateTime.UtcNow;
-                var isEdit = bug.TesterComment is not null;
-
-                var newComment = new EmbeddedComment
+                var comment = new Comment
                 {
-                    AuthorId = actorObjId,
-                    AuthorName = callerMember.FullName,
+                    ProjectId = projectId,
+                    EntityType = CommentEntityType.Bug,
+                    EntityId = bugId,
                     Content = request.Content.Trim(),
-                    IsEdited = isEdit,
-                    CreatedAt = isEdit ? bug.TesterComment!.CreatedAt : now,
-                    UpdatedAt = now
+                    AuthorId = actorUserId,
+                    IsEdited = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
                 };
 
-                var update = Builders<Bug>.Update.Combine(
-                    Builders<Bug>.Update.Set(b => b.TesterComment, newComment),
-                    Builders<Bug>.Update.Set(b => b.UpdatedAt, now)
-                );
+                await _db.Comments.InsertOneAsync(comment, cancellationToken: token);
 
-                await _db.Bugs.UpdateOneAsync(b => b.Id == bugId, update, cancellationToken: token);
-
-                await LogActivityAsync(projectObjId, actorObjId, callerMember.FullName,
-                    isEdit ? ActivityAction.BugTesterCommentEdited : ActivityAction.BugTesterCommentAdded,
-                    ActivityEntityType.Bug, bugObjId, $"BUG-{bug.BugNumber:D3}: {bug.Title}", token: token);
-
-                var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
-                return Ok(MapToBugResponse(updated!));
+                return Ok(true);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error upserting tester comment on bug {BugId}.", bugId);
-                return SystemError<BugResponse>();
+                Log.Error(ex, "Error adding comment to bug {BugId}", bugId);
+                return SystemError<bool>();
             }
         }
 
 
 
 
-        // ═══════════════════════════════════════════
-        // UPSERT DEVELOPER COMMENT
-        // Only the assigned developer can write/overwrite this.
-        // ═══════════════════════════════════════════
-        public async Task<ApiResponse<BugResponse>> UpsertDeveloperCommentAsync(
-            string actorUserId,
-            string projectId,
-            string bugId,
-            UpsertDeveloperCommentRequest request,
-            CancellationToken token)
-        {
-            try
-            {
-                var (valid, actorObjId, projectObjId, bugObjId, error) = ParseIds(actorUserId, projectId, bugId);
-                if (!valid) return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, error!);
+        //// ═══════════════════════════════════════════
+        //// UPSERT TESTER COMMENT
+        //// Only the assigned tester or the original reporter.
+        //// Overwrites the single tester comment on the bug.
+        //// ═══════════════════════════════════════════
+        //public async Task<ApiResponse<BugResponse>> UpsertTesterCommentAsync(
+        //    string actorUserId,
+        //    string projectId,
+        //    string bugId,
+        //    UpsertTesterCommentRequest request,
+        //    CancellationToken token)
+        //{
+        //    try
+        //    {
+        //        var (valid, actorObjId, projectObjId, bugObjId, error) = ParseIds(actorUserId, projectId, bugId);
+        //        if (!valid) return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, error!);
 
-                var (project, bug, memberError) = await FetchProjectAndBugAsync(projectObjId, bugObjId, actorObjId, token);
-                if (memberError is not null) return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
-                if (project is null || bug is null) return Fail<BugResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
+        //        var (project, bug, memberError) = await FetchProjectAndBugAsync(projectObjId, bugObjId, actorObjId, token);
+        //        if (memberError is not null) return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
+        //        if (project is null || bug is null) return Fail<BugResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
 
-                // Must be the assigned developer
-                if (bug.AssignedDeveloperId != actorObjId)
-                    return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode,
-                        "Only the developer assigned to this bug can write the developer comment.");
+        //        // Only assigned tester or reporter can write the tester comment
+        //        var canComment = bug.AssignedTesterId == actorObjId || bug.ReportedById == actorObjId;
+        //        if (!canComment)
+        //            return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode,
+        //                "Only the assigned tester or the original reporter can write the tester comment on this bug.");
 
-                if (TerminalStatuses.Contains(bug.Status.ToString()))
-                    return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
-                        $"This bug is '{bug.Status}'. Comments cannot be updated on a closed bug.");
+        //        var callerMember = project.Members.First(m => m.UserId == actorUserId);
+        //        var now = DateTime.UtcNow;
+        //        var isEdit = bug.TesterComment is not null;
 
-                var callerMember = project.Members.First(m => m.UserId == actorUserId);
-                var now = DateTime.UtcNow;
-                var isEdit = bug.DeveloperComment is not null;
+        //        var newComment = new EmbeddedComment
+        //        {
+        //            AuthorId = actorObjId,
+        //            AuthorName = callerMember.FullName,
+        //            Content = request.Content.Trim(),
+        //            IsEdited = isEdit,
+        //            CreatedAt = isEdit ? bug.TesterComment!.CreatedAt : now,
+        //            UpdatedAt = now
+        //        };
 
-                var newComment = new EmbeddedComment
-                {
-                    AuthorId = actorObjId,
-                    AuthorName = callerMember.FullName,
-                    Content = request.Content.Trim(),
-                    IsEdited = isEdit,
-                    CreatedAt = isEdit ? bug.DeveloperComment!.CreatedAt : now,
-                    UpdatedAt = now
-                };
+        //        var update = Builders<Bug>.Update.Combine(
+        //            Builders<Bug>.Update.Set(b => b.TesterComment, newComment),
+        //            Builders<Bug>.Update.Set(b => b.UpdatedAt, now)
+        //        );
 
-                var update = Builders<Bug>.Update.Combine(
-                    Builders<Bug>.Update.Set(b => b.DeveloperComment, newComment),
-                    Builders<Bug>.Update.Set(b => b.UpdatedAt, now)
-                );
+        //        await _db.Bugs.UpdateOneAsync(b => b.Id == bugId, update, cancellationToken: token);
 
-                await _db.Bugs.UpdateOneAsync(b => b.Id == bugId, update, cancellationToken: token);
+        //        await LogActivityAsync(projectObjId, actorObjId, callerMember.FullName,
+        //            isEdit ? ActivityAction.BugTesterCommentEdited : ActivityAction.BugTesterCommentAdded,
+        //            ActivityEntityType.Bug, bugObjId, $"BUG-{bug.BugNumber:D3}: {bug.Title}", token: token);
 
-                await LogActivityAsync(projectObjId, actorObjId, callerMember.FullName,
-                    isEdit ? ActivityAction.BugDeveloperCommentEdited : ActivityAction.BugDeveloperCommentAdded,
-                    ActivityEntityType.Bug, bugObjId, $"BUG-{bug.BugNumber:D3}: {bug.Title}", token: token);
+        //        var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
+        //        return Ok(MapToBugResponse(updated!));
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Log.Error(ex, "Error upserting tester comment on bug {BugId}.", bugId);
+        //        return SystemError<BugResponse>();
+        //    }
+        //}
 
-                var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
-                return Ok(MapToBugResponse(updated!));
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Error upserting developer comment on bug {BugId}.", bugId);
-                return SystemError<BugResponse>();
-            }
-        }
+        //// ═══════════════════════════════════════════
+        //// UPSERT DEVELOPER COMMENT
+        //// Only the assigned developer can write/overwrite this.
+        //// ═══════════════════════════════════════════
+        //public async Task<ApiResponse<BugResponse>> UpsertDeveloperCommentAsync(
+        //    string actorUserId,
+        //    string projectId,
+        //    string bugId,
+        //    UpsertDeveloperCommentRequest request,
+        //    CancellationToken token)
+        //{
+        //    try
+        //    {
+        //        var (valid, actorObjId, projectObjId, bugObjId, error) = ParseIds(actorUserId, projectId, bugId);
+        //        if (!valid) return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, error!);
+
+        //        var (project, bug, memberError) = await FetchProjectAndBugAsync(projectObjId, bugObjId, actorObjId, token);
+        //        if (memberError is not null) return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode, memberError);
+        //        if (project is null || bug is null) return Fail<BugResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
+
+        //        // Must be the assigned developer
+        //        if (bug.AssignedDeveloperId != actorObjId)
+        //            return Fail<BugResponse>(ResponseCodes.UnAuthorized.ResponseCode,
+        //                "Only the developer assigned to this bug can write the developer comment.");
+
+        //        if (TerminalStatuses.Contains(bug.Status.ToString()))
+        //            return Fail<BugResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+        //                $"This bug is '{bug.Status}'. Comments cannot be updated on a closed bug.");
+
+        //        var callerMember = project.Members.First(m => m.UserId == actorUserId);
+        //        var now = DateTime.UtcNow;
+        //        var isEdit = bug.DeveloperComment is not null;
+
+        //        var newComment = new EmbeddedComment
+        //        {
+        //            AuthorId = actorObjId,
+        //            AuthorName = callerMember.FullName,
+        //            Content = request.Content.Trim(),
+        //            IsEdited = isEdit,
+        //            CreatedAt = isEdit ? bug.DeveloperComment!.CreatedAt : now,
+        //            UpdatedAt = now
+        //        };
+
+        //        var update = Builders<Bug>.Update.Combine(
+        //            Builders<Bug>.Update.Set(b => b.DeveloperComment, newComment),
+        //            Builders<Bug>.Update.Set(b => b.UpdatedAt, now)
+        //        );
+
+        //        await _db.Bugs.UpdateOneAsync(b => b.Id == bugId, update, cancellationToken: token);
+
+        //        await LogActivityAsync(projectObjId, actorObjId, callerMember.FullName,
+        //            isEdit ? ActivityAction.BugDeveloperCommentEdited : ActivityAction.BugDeveloperCommentAdded,
+        //            ActivityEntityType.Bug, bugObjId, $"BUG-{bug.BugNumber:D3}: {bug.Title}", token: token);
+
+        //        var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
+        //        return Ok(MapToBugResponse(updated!));
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Log.Error(ex, "Error upserting developer comment on bug {BugId}.", bugId);
+        //        return SystemError<BugResponse>();
+        //    }
+        //}
 
 
 
@@ -1218,24 +1270,24 @@ namespace BugTracker.Services.Services
             AssignedDeveloper = bug.AssignedDeveloperId.HasValue
                 ? new BugPersonRef { UserId = bug.AssignedDeveloperId.ToString()!, FullName = bug.AssignedDeveloperName!, Email = bug.AssignedDeveloperEmail! }
                 : null,
-            TesterComment = bug.TesterComment is null ? null : new BugComment
-            {
-                AuthorId = bug.TesterComment.AuthorId.ToString(),
-                AuthorName = bug.TesterComment.AuthorName,
-                Content = bug.TesterComment.Content,
-                IsEdited = bug.TesterComment.IsEdited,
-                CreatedAt = bug.TesterComment.CreatedAt,
-                UpdatedAt = bug.TesterComment.UpdatedAt
-            },
-            DeveloperComment = bug.DeveloperComment is null ? null : new BugComment
-            {
-                AuthorId = bug.DeveloperComment.AuthorId.ToString(),
-                AuthorName = bug.DeveloperComment.AuthorName,
-                Content = bug.DeveloperComment.Content,
-                IsEdited = bug.DeveloperComment.IsEdited,
-                CreatedAt = bug.DeveloperComment.CreatedAt,
-                UpdatedAt = bug.DeveloperComment.UpdatedAt
-            },
+            //TesterComment = bug.TesterComment is null ? null : new BugComment
+            //{
+            //    AuthorId = bug.TesterComment.AuthorId.ToString(),
+            //    AuthorName = bug.TesterComment.AuthorName,
+            //    Content = bug.TesterComment.Content,
+            //    IsEdited = bug.TesterComment.IsEdited,
+            //    CreatedAt = bug.TesterComment.CreatedAt,
+            //    UpdatedAt = bug.TesterComment.UpdatedAt
+            //},
+            //DeveloperComment = bug.DeveloperComment is null ? null : new BugComment
+            //{
+            //    AuthorId = bug.DeveloperComment.AuthorId.ToString(),
+            //    AuthorName = bug.DeveloperComment.AuthorName,
+            //    Content = bug.DeveloperComment.Content,
+            //    IsEdited = bug.DeveloperComment.IsEdited,
+            //    CreatedAt = bug.DeveloperComment.CreatedAt,
+            //    UpdatedAt = bug.DeveloperComment.UpdatedAt
+            //},
             Attachments = bug.Attachments.Select(a => new BugAttachmentResponse
             {
                 Url = a.Url,
@@ -1253,6 +1305,13 @@ namespace BugTracker.Services.Services
                 ChangedBy = h.ChangedBy.ToString(),
                 Comment = h.Comment,
                 ChangedAt = h.ChangedAt
+            }).ToList(),
+            Comments = bug.Comments.Select(c => new BugCommentResponse
+            {
+                AuthorId = c.AuthorId.ToString(),
+                Content = c.Content,
+                IsEdited = c.IsEdited,
+                CreatedAt = c.CreatedAt
             }).ToList(),
             ResolvedAt = bug.ResolvedAt,
             CreatedAt = bug.CreatedAt,

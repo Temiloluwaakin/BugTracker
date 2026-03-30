@@ -111,6 +111,13 @@ namespace BugTracker.Data.Models
         public DateTime? ProjectDueDate { get; set; }
         public List<string> Tags { get; set; } = new();
         public DateTime CreatedAt { get; set; }
+        public int TotalBugs { get; set; }
+        public int OpenBugs { get; set; }
+        public int InProgressBugs { get; set; }
+        public int ClosedBugs { get; set; }
+        public int WontFixBugs { get; set; }
+        public int DuplicateBugs { get; set; }
+        public double CompletionPercentage { get; set; }
     }
 
     public class MemberResponse

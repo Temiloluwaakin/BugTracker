@@ -215,53 +215,67 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        
-        /// <summary>
-        /// Create or overwrite the tester comment on a bug. Only the assigned tester (or original reporter) can do this.
-        /// </summary>
-        /// <param name="projectId"></param>
-        /// <param name="bugId"></param>
-        /// <param name="request"></param>
-        /// <param name="token"></param>
-        /// <returns></returns>
-        [HttpPut("{bugId}/tester-comment")]
-        public async Task<IActionResult> UpsertTesterComment(
+
+        ///// <summary>
+        ///// Create or overwrite the tester comment on a bug. Only the assigned tester (or original reporter) can do this.
+        ///// </summary>
+        ///// <param name="projectId"></param>
+        ///// <param name="bugId"></param>
+        ///// <param name="request"></param>
+        ///// <param name="token"></param>
+        ///// <returns></returns>
+        //[HttpPut("{bugId}/tester-comment")]
+        //public async Task<IActionResult> UpsertTesterComment(
+        //    string projectId,
+        //    string bugId,
+        //    [FromBody] UpsertTesterCommentRequest request,
+        //    CancellationToken token)
+        //{
+        //    var userId = GetCurrentUserId();
+        //    if (userId is null) return UnauthorizedResponse();
+
+        //    var result = await _bugService.UpsertTesterCommentAsync(userId, projectId, bugId, request, token);
+        //    return Ok(result);
+        //}
+
+        ///// <summary>
+        ///// Create or overwrite the developer comment on a bug. Only the assigned developer can do this.
+        ///// </summary>
+        ///// <param name="projectId"></param>
+        ///// <param name="bugId"></param>
+        ///// <param name="request"></param>
+        ///// <param name="token"></param>
+        ///// <returns></returns>
+        //[HttpPut("{bugId}/developer-comment")]
+        //public async Task<IActionResult> UpsertDeveloperComment(
+        //    string projectId,
+        //    string bugId,
+        //    [FromBody] UpsertDeveloperCommentRequest request,
+        //    CancellationToken token)
+        //{
+        //    var userId = GetCurrentUserId();
+        //    if (userId is null) return UnauthorizedResponse();
+
+        //    var result = await _bugService.UpsertDeveloperCommentAsync(userId, projectId, bugId, request, token);
+        //    return Ok(result);
+        //}
+
+
+        [HttpPost("{bugId}/comments")]
+        public async Task<IActionResult> AddComment(
             string projectId,
             string bugId,
-            [FromBody] UpsertTesterCommentRequest request,
+            [FromBody] AddCommentRequest request,
             CancellationToken token)
         {
             var userId = GetCurrentUserId();
             if (userId is null) return UnauthorizedResponse();
 
-            var result = await _bugService.UpsertTesterCommentAsync(userId, projectId, bugId, request, token);
+            var result = await _bugService.AddCommentAsync(userId, projectId, bugId, request, token);
             return Ok(result);
         }
 
-        
-        /// <summary>
-        /// Create or overwrite the developer comment on a bug. Only the assigned developer can do this.
-        /// </summary>
-        /// <param name="projectId"></param>
-        /// <param name="bugId"></param>
-        /// <param name="request"></param>
-        /// <param name="token"></param>
-        /// <returns></returns>
-        [HttpPut("{bugId}/developer-comment")]
-        public async Task<IActionResult> UpsertDeveloperComment(
-            string projectId,
-            string bugId,
-            [FromBody] UpsertDeveloperCommentRequest request,
-            CancellationToken token)
-        {
-            var userId = GetCurrentUserId();
-            if (userId is null) return UnauthorizedResponse();
 
-            var result = await _bugService.UpsertDeveloperCommentAsync(userId, projectId, bugId, request, token);
-            return Ok(result);
-        }
-
-        
         /// <summary>
         /// Add an attachment to a bug. Any project member can add attachments.
         /// </summary>

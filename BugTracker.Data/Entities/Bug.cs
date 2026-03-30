@@ -7,6 +7,7 @@ namespace BugTracker.Data.Entities
     /// Represents a bug report filed within a project.
     /// Collection: bugs
     /// </summary>
+    [BsonIgnoreExtraElements]
     public class Bug : BaseDocument
     {
         [BsonElement("projectId")]
@@ -118,14 +119,21 @@ namespace BugTracker.Data.Entities
         public string? AssignedDeveloperEmail { get; set; }
 
 
-        //editable comments per role, tester or developer
-        [BsonElement("testerComment")]
-        [BsonIgnoreIfNull]
-        public EmbeddedComment? TesterComment { get; set; }
+        ////editable comments per role, tester or developer
+        //[BsonElement("testerComment")]
+        //[BsonIgnoreIfNull]
+        //public EmbeddedComment? TesterComment { get; set; }
 
-        [BsonElement("developerComment")]
-        [BsonIgnoreIfNull]
-        public EmbeddedComment? DeveloperComment { get; set; }
+        //[BsonElement("developerComment")]
+        //[BsonIgnoreIfNull]
+        //public EmbeddedComment? DeveloperComment { get; set; }
+
+        /// <summary>
+        /// Lightweight audit trail of every comments
+        /// Append-only — never remove entries.
+        /// </summary>
+        [BsonElement("comments")]
+        public List<EmbeddedComment> Comments { get; set; } = new();
 
 
         [BsonElement("attachments")]

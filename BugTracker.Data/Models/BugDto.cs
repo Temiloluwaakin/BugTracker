@@ -151,6 +151,11 @@ namespace BugTracker.Data.Models
         public string Content { get; set; } = string.Empty;
     }
 
+    public class AddCommentRequest
+    {
+        public string Content { get; set; } = string.Empty;
+    }
+
     // ─────────────────────────────────────────────
     // Add Attachment
     // ─────────────────────────────────────────────
@@ -230,10 +235,20 @@ namespace BugTracker.Data.Models
         public string? DuplicateOf { get; set; }
 
         public List<StatusHistoryResponse> StatusHistory { get; set; } = new();
+        public List<BugCommentResponse> Comments { get; set; }
 
         public DateTime? ResolvedAt { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+    }
+
+    public class BugCommentResponse
+    {
+        public string Id { get; set; }
+        public string AuthorId { get; set; }
+        public string Content { get; set; }
+        public bool IsEdited { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     public class BugSummaryResponse

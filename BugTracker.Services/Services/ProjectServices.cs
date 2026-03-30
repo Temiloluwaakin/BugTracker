@@ -195,9 +195,46 @@ namespace BugTracker.Services.Services
                     .SortByDescending(p => p.CreatedAt)
                     .ToListAsync(token);
 
+                var projectIds = projects.Select(p => p.Id).ToList();
+
+                var bugStats = await _db.Bugs.Aggregate()
+                    .Match(b => projectIds.Contains(b.ProjectId))
+                    .Group(
+                        b => new { b.ProjectId, b.Status },
+                        g => new
+                        {
+                            ProjectId = g.Key.ProjectId,
+                            Status = g.Key.Status,
+                            Count = g.Count()
+                        })
+                    .ToListAsync(token);
+
+                var bugLookup = bugStats
+                    .GroupBy(x => x.ProjectId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.ToDictionary(x => x.Status, x => x.Count)
+                    );
+
+
                 var summaries = projects.Select(p =>
                 {
                     var myMember = p.Members.First(m => m.UserId == actorUserId);
+
+                    var stats = bugLookup.GetValueOrDefault(p.Id, new Dictionary<BugStatus, int>());
+
+                    int open = stats.GetValueOrDefault(BugStatus.Open);
+                    int inProgress = stats.GetValueOrDefault(BugStatus.InProgress);
+                    int closed = stats.GetValueOrDefault(BugStatus.Closed);
+                    int wontFix = stats.GetValueOrDefault(BugStatus.WontFix);
+                    int duplicate = stats.GetValueOrDefault(BugStatus.Duplicate);
+
+                    var totalBugs = stats.Values.Sum();
+
+                    var completion = totalBugs == 0
+                        ? 0
+                        : Math.Round((double)closed / totalBugs * 100, 2);
+
                     return new ProjectSummaryResponse
                     {
                         Id = p.Id.ToString(),
@@ -210,7 +247,15 @@ namespace BugTracker.Services.Services
                         YourRole = myMember.Role.ToString(),
                         MemberCount = p.Members.Count,
                         Tags = p.Tags,
-                        CreatedAt = p.CreatedAt
+                        CreatedAt = p.CreatedAt,
+
+                        TotalBugs = totalBugs,
+                        OpenBugs = open,
+                        InProgressBugs = inProgress,
+                        ClosedBugs = closed,
+                        WontFixBugs = wontFix,
+                        DuplicateBugs = duplicate,
+                        CompletionPercentage = completion
                     };
                 }).ToList();
 
