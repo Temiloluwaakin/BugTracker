@@ -57,6 +57,9 @@ namespace BugTracker.Data.Entities
         [BsonRepresentation(BsonType.ObjectId)]
         public string AuthorId { get; set; } = string.Empty;
 
+        [BsonElement("authorName")]
+        public string AuthorName { get; set; }
+
         /// <summary>
         /// True if the comment was edited after initial creation.
         /// </summary>

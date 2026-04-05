@@ -246,6 +246,7 @@ namespace BugTracker.Data.Models
     {
         public string Id { get; set; }
         public string AuthorId { get; set; }
+        public string AuthorName { get; set; }
         public string Content { get; set; }
         public bool IsEdited { get; set; }
         public DateTime CreatedAt { get; set; }

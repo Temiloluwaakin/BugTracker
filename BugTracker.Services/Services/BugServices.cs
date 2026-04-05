@@ -342,6 +342,7 @@ namespace BugTracker.Services.Services
                 {
                     Id = c.Id.ToString(),
                     AuthorId = c.AuthorId,
+                    AuthorName = c.AuthorName,
                     Content = c.Content,
                     IsEdited = c.IsEdited,
                     CreatedAt = c.CreatedAt
@@ -896,6 +897,7 @@ namespace BugTracker.Services.Services
                     EntityId = bugId,
                     Content = request.Content.Trim(),
                     AuthorId = actorUserId,
+                    AuthorName = member.FullName,
                     IsEdited = false,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
