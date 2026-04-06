@@ -53,6 +53,14 @@ namespace BugTracker.Data.Context
 
         public IMongoCollection<ChatMessage> ChatMessages =>
             _database.GetCollection<ChatMessage>("chatMessages");
+        public IMongoCollection<TesterProfile> TesterProfiles =>
+            _database.GetCollection<TesterProfile>("testerProfiles");
+
+        public IMongoCollection<DmConversation> DmConversations =>
+            _database.GetCollection<DmConversation>("dmConversations");
+
+        public IMongoCollection<DirectMessage> DirectMessages =>
+            _database.GetCollection<DirectMessage>("directMessages");
 
 
 
@@ -146,6 +154,40 @@ namespace BugTracker.Data.Context
                     .Descending(a => a.CreatedAt),
                 new CreateIndexOptions { Name = "idx_activityLogs_projectId_createdAt" }));
 
+
+
+            TesterProfiles.Indexes.CreateOneAsync(new CreateIndexModel<TesterProfile>(
+                    Builders<TesterProfile>.IndexKeys.Ascending(p => p.UserId),
+                    new CreateIndexOptions { Unique = true }
+                ));
+
+            // Index on skills array — primary search field
+            TesterProfiles.Indexes.CreateOneAsync(new CreateIndexModel<TesterProfile>(
+                    Builders<TesterProfile>.IndexKeys.Ascending(p => p.Skills)
+                ));
+
+            // Compound index on availabilityStatus + isPublic — powers the discovery search
+            TesterProfiles.Indexes.CreateOneAsync(new CreateIndexModel<TesterProfile>(
+                    Builders<TesterProfile>.IndexKeys
+                        .Ascending(p => p.AvailabilityStatus)
+                        .Ascending(p => p.IsPublic)
+                ));
+
+            // Unique compound index on participantIds array
+            // Prevents duplicate conversations between the same pair of users
+            DmConversations.Indexes.CreateOneAsync(new CreateIndexModel<DmConversation>(
+                    Builders<DmConversation>.IndexKeys.Ascending(c => c.ParticipantIds),
+                    new CreateIndexOptions { Unique = true }
+                ));
+
+            // ── DirectMessages ──
+
+            // Compound index on conversationId + sentAt — primary query pattern
+            DirectMessages.Indexes.CreateOneAsync(new CreateIndexModel<DirectMessage>(
+                    Builders<DirectMessage>.IndexKeys
+                        .Ascending(m => m.ConversationId)
+                        .Descending(m => m.SentAt)
+                ));
         }
     }
 }

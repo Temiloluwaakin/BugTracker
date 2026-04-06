@@ -66,6 +66,7 @@ builder.Services.AddScoped<IUserService, UserServices>();
 builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IResponseHelper, ResponseHelper>();
 builder.Services.AddScoped<IChatService, ChatServices>();
+builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 //api versioning

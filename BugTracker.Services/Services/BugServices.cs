@@ -1262,7 +1262,8 @@ namespace BugTracker.Services.Services
             Severity = bug.Severity.ToString(),
             Priority = bug.Priority.ToString(),
             Status = bug.Status.ToString(),
-            DeveloperStatus = bug.DeveloperStatus.ToString() ?? DevelopersStatus.NotAssigned.ToString(),
+            //DeveloperStatus = bug.DeveloperStatus.ToString() ?? DevelopersStatus.NotAssigned.ToString(),
+            DeveloperStatus = bug.DeveloperStatus == null ? DevelopersStatus.NotAssigned.ToString() : bug.DeveloperStatus.ToString(),
             Environment = bug.Environment,
             Version = bug.Version,
             ReportedBy = new BugPersonRef { UserId = bug.ReportedById.ToString(), FullName = bug.ReportedByName, Email = bug.ReportedByEmail },
@@ -1290,31 +1291,49 @@ namespace BugTracker.Services.Services
             //    CreatedAt = bug.DeveloperComment.CreatedAt,
             //    UpdatedAt = bug.DeveloperComment.UpdatedAt
             //},
-            Attachments = bug.Attachments.Select(a => new BugAttachmentResponse
-            {
-                Url = a.Url,
-                FileName = a.FileName,
-                FileType = a.FileType,
-                UploadedBy = a.UploadedBy.ToString(),
-                UploadedAt = a.UploadedAt
-            }).ToList(),
-            Tags = bug.Tags,
+            Attachments = (bug.Attachments ?? new List<BugAttachment>())
+                .Select(a => new BugAttachmentResponse
+                {
+                    Url = a.Url,
+                    FileName = a.FileName,
+                    FileType = a.FileType,
+                    UploadedBy = a.UploadedBy.ToString(),
+                    UploadedAt = a.UploadedAt
+                }).ToList(),
+            Tags = bug.Tags ?? new List<string>(),
             DuplicateOf = bug.DuplicateOfId?.ToString(),
-            StatusHistory = bug.StatusHistory.Select(h => new StatusHistoryResponse
-            {
-                FromStatus = h.FromStatus.ToString(),
-                ToStatus = h.ToStatus.ToString(),
-                ChangedBy = h.ChangedBy.ToString(),
-                Comment = h.Comment,
-                ChangedAt = h.ChangedAt
-            }).ToList(),
-            Comments = bug.Comments.Select(c => new BugCommentResponse
-            {
-                AuthorId = c.AuthorId.ToString(),
-                Content = c.Content,
-                IsEdited = c.IsEdited,
-                CreatedAt = c.CreatedAt
-            }).ToList(),
+            //StatusHistory = bug.StatusHistory.Select(h => new StatusHistoryResponse
+            //{
+            //    FromStatus = h.FromStatus.ToString(),
+            //    ToStatus = h.ToStatus.ToString(),
+            //    ChangedBy = h.ChangedBy.ToString(),
+            //    Comment = h.Comment,
+            //    ChangedAt = h.ChangedAt
+            //}).ToList(),
+            //Comments = bug.Comments.Select(c => new BugCommentResponse
+            //{
+            //    AuthorId = c.AuthorId.ToString(),
+            //    Content = c.Content,
+            //    IsEdited = c.IsEdited,
+            //    CreatedAt = c.CreatedAt
+            //}).ToList(),
+            StatusHistory = (bug.StatusHistory ?? new List<BugStatusHistory>())
+                .Select(h => new StatusHistoryResponse
+                {
+                    FromStatus = h.FromStatus.ToString(),
+                    ToStatus = h.ToStatus.ToString(),
+                    ChangedBy = h.ChangedBy.ToString(),
+                    Comment = h.Comment,
+                    ChangedAt = h.ChangedAt
+                }).ToList(),
+            Comments = (bug.Comments ?? new List<EmbeddedComment>())
+                .Select(c => new BugCommentResponse
+                {
+                    AuthorId = c.AuthorId.ToString(),
+                    Content = c.Content,
+                    IsEdited = c.IsEdited,
+                    CreatedAt = c.CreatedAt
+                }).ToList(),
             ResolvedAt = bug.ResolvedAt,
             CreatedAt = bug.CreatedAt,
             UpdatedAt = bug.UpdatedAt
