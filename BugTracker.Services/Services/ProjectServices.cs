@@ -2,6 +2,7 @@
 using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
+using BugTracker.Services.Helpers;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Serilog;
@@ -27,14 +28,18 @@ namespace BugTracker.Services.Services
     public class ProjectServices : IProjectService
     {
         private readonly DatabaseContext _db;
+        private readonly IEmailHelper _emailHelper;
 
         private static readonly HashSet<string> ValidProjectStatuses = new() { "active", "archived", "completed" };
         private static readonly HashSet<string> ValidInviteRoles = new() { "tester", "viewer", "developer"};
         private static readonly HashSet<string> ValidUpdateRoles = new() { "tester", "viewer", "developer" };
 
-        public ProjectServices(DatabaseContext db)
+        public ProjectServices(DatabaseContext db,
+            IEmailHelper emailHelper
+            )
         {
             _db = db;
+            _emailHelper = emailHelper;
         }
 
         
@@ -87,6 +92,9 @@ namespace BugTracker.Services.Services
                 };
 
                 var members = new List<ProjectMember> { ownerMember };
+                
+                var membersEmails = new List<string>();
+                var nonusers = new List<CreateProjectMemberRequest>();
 
                 // 4. Process additional members
                 if (request.Members != null && request.Members.Any())
@@ -109,7 +117,10 @@ namespace BugTracker.Services.Services
                             u.Email.ToLower() == email);
 
                         if (user == null)
+                        {
+                            nonusers.Add(reqMember);
                             continue;
+                        }
 
                         if (user.Id == actor.Id)
                             continue;
@@ -132,6 +143,8 @@ namespace BugTracker.Services.Services
                             JoinedAt = DateTime.UtcNow,
                             AddedBy = actor.Id
                         });
+
+                        membersEmails.Add(user.Email);
                     }
                 }
 
@@ -153,6 +166,41 @@ namespace BugTracker.Services.Services
 
                 await _db.Projects.InsertOneAsync(project, cancellationToken: token);
 
+                //send invitation to the non users
+                if (nonusers != null)
+                {
+                    foreach (var user in nonusers)
+                    {
+                        if (!TryParseEnum<ProjectRole>(user.Role, out var role))
+                        {
+                            Log.Warning("Invalid role '{Role}' supplied for {Email}", user.Role, user.Email);
+                            continue;
+                        }
+
+                        var invitation = new Invitation
+                        {
+                            ProjectId = project.Id,
+                            ProjectName = projectName,
+                            InvitedEmail = user.Email,
+                            InvitedBy = actor.Id,
+                            Role = role,
+                            Token = GenerateSecureToken(),
+                            Status = InvitationStatus.Pending,
+                            ExpiresAt = DateTime.UtcNow.AddDays(7),
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        await _db.Invitations.InsertOneAsync(invitation, cancellationToken: token);
+
+                        await _emailHelper.SendAsync(new EmailRequest
+                        {
+                            To = user.Email,
+                            Subject = "Project Invitation",
+                            TextBody = $"You’ve been invited to {projectName}. Join here: https://test-orbit-rho.vercel.app/Login?inviteToken={invitation.Token}"
+                        });
+                    }
+                }
+
                 // 5. Log the activity
                 await LogActivityAsync(
                     projectId: ObjectId.Parse(project.Id),
@@ -164,6 +212,20 @@ namespace BugTracker.Services.Services
                     entityTitle: project.Name,
                     token: token
                 );
+
+
+                var notify = await _emailHelper.SendAsync(new EmailRequest
+                {
+                    To = ownerMember.Email,
+                    Subject = "Project Invitation",
+                    BCC = membersEmails,
+                    TextBody = $"You have been invited to the project: {projectName} Kindly log on to view.",
+                    HtmlBody = null
+                });
+                if (notify == null)
+                {
+                    Log.Warning("Failed to send Login Confirmation mail");
+                };
 
                 Log.Information("Project {ProjectId} '{Name}' created by user {UserId}.", project.Id, project.Name, actorUserId);
                 return Ok(MapToProjectResponse(project));
@@ -576,6 +638,18 @@ namespace BugTracker.Services.Services
                         metadata: new Dictionary<string, string> { { "role", role } },
                         token: token);
 
+                    var notify = await _emailHelper.SendAsync(new EmailRequest
+                    {
+                        To = invitedEmail,
+                        Subject = "Project Invitation",
+                        TextBody = $"You have been invited to the project: {project.Name} Kindly log on to continue",
+                        HtmlBody = null
+                    });
+                    if (notify == null)
+                    {
+                        Log.Warning("Failed to send Login Confirmation mail");
+                    }
+
                     Log.Information("User {InvitedUserId} directly added to project {ProjectId} by owner {OwnerId}.",
                         existingUser.Id, projectId, actorUserId);
 
@@ -590,7 +664,7 @@ namespace BugTracker.Services.Services
                         ProjectName = project.Name,
                         InvitedEmail = invitedEmail,
                         InvitedBy = actorUserId,
-                        Role = role == "tester" ? ProjectRole.Tester : ProjectRole.Viewer,
+                        Role = role == "tester" ? ProjectRole.Tester : role == "developer" ? ProjectRole.Developer : ProjectRole.Viewer,
                         Token = GenerateSecureToken(),
                         Status = InvitationStatus.Pending,
                         ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -599,8 +673,17 @@ namespace BugTracker.Services.Services
 
                     await _db.Invitations.InsertOneAsync(invitation, cancellationToken: token);
 
-                    // TODO: dispatch an email with the invite link containing invitation.Token
-                    // e.g. await _emailService.SendInvitationEmailAsync(invitedEmail, project.Name, invitation.Token, role);
+                    var notify = await _emailHelper.SendAsync(new EmailRequest
+                    {
+                        To = invitedEmail,
+                        Subject = "Project Invitation",
+                        TextBody = $"You have been invited to the project: {project.Name} Kindly use the link below to log on to view. https://test-orbit-rho.vercel.app/Login?inviteToken={invitation.Token}",
+                        HtmlBody = null
+                    });
+                    if (notify == null)
+                    {
+                        Log.Warning("Failed to send Login Confirmation mail");
+                    }
 
                     await LogActivityAsync(
                         projectId: projectObjId,

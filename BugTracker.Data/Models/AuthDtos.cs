@@ -26,6 +26,8 @@ namespace BugTracker.Data.Models
         [MinLength(8)]
         [MaxLength(50)]
         public string Password { get; set; } = string.Empty;
+
+        public string? InviteToken { get; set; }
     }
 
     public class LoginRequest

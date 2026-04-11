@@ -46,6 +46,8 @@ namespace BugTracker.Data.Models
 
         /// <summary>Whether this profile appears in owner search results.</summary>
         public bool? IsPublic { get; set; }
+
+        public List<AddPortfolioItemRequest>? Experience {  get; set; }
     }
 
     public class ProfileSocialLinksRequest
@@ -87,8 +89,10 @@ namespace BugTracker.Data.Models
         [StringLength(300)]
         public string? Link { get; set; }
 
-        [StringLength(50, ErrorMessage = "Duration cannot exceed 50 characters.")]
-        public string? Duration { get; set; }
+        [Required(ErrorMessage = "Start date is requires")]
+        public DateTime StartDate { get; set; }
+
+        public DateTime? EndDate { get; set; }
     }
 
     // ─────────────────────────────────────────────

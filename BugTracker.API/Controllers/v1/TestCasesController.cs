@@ -1,9 +1,11 @@
 ﻿using Asp.Versioning;
 using BugTracker.Data;
+using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using BugTracker.Services.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json.Linq;
 using System.Security.Claims;
 
 namespace BugTracker.API.Controllers.v1
@@ -31,10 +33,35 @@ namespace BugTracker.API.Controllers.v1
                 ResponseMessage = "User identity could not be resolved."
             });
 
-        // ─────────────────────────────────────────────
-        // POST /api/projects/{projectId}/testcases
-        // Create a test case. Testers and owners only.
-        // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// To generate test case by uploading a base64 document and carrying it out
+        /// </summary>
+        /// <param name="request"></param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
+        [HttpPost("generate")]
+        public async Task<IActionResult> Generate(
+            string projectId,
+            [FromBody] GenerateTestCaseReq request, 
+            CancellationToken token)
+        {
+            var userId = GetCurrentUserId();
+            if (userId is null) return UnauthorizedResponse();
+
+            var result = await _testCaseService.GenerateTestCase(userId, projectId, request, token);
+            return StatusCode(result.ResponseCode == ResponseCodes.Success.ResponseCode ? 201 : 400, result);
+        }
+
+
+        
+        /// <summary>
+        /// To create a Test case. only a tester or owner can do that
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPost]
         public async Task<IActionResult> CreateTestCase(
             string projectId,
@@ -48,10 +75,15 @@ namespace BugTracker.API.Controllers.v1
             return StatusCode(result.ResponseCode == ResponseCodes.Success.ResponseCode ? 201 : 400, result);
         }
 
-        // ─────────────────────────────────────────────
-        // GET /api/projects/{projectId}/testcases
-        // Get all test cases in a project. Any member can view.
-        // ─────────────────────────────────────────────
+        
+
+        /// <summary>
+        /// to get all test casese in a project, any member can view it
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="query"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpGet]
         public async Task<IActionResult> GetTestCases(
             string projectId,
@@ -65,10 +97,15 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // GET /api/projects/{projectId}/testcases/{testCaseId}
-        // Get a single test case. Any project member can view.
-        // ─────────────────────────────────────────────
+        
+        
+        /// <summary>
+        /// to get a single test case. any member can view
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpGet("{testCaseId}")]
         public async Task<IActionResult> GetTestCaseById(
             string projectId,
@@ -82,11 +119,16 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // PUT /api/projects/{projectId}/testcases/{testCaseId}
-        // Update test case metadata. Creator or owner only.
-        // Cannot edit a deprecated test case.
-        // ─────────────────────────────────────────────
+        
+        
+        /// <summary>
+        /// to update a test case metadata. only the creator or owner.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPut("{testCaseId}")]
         public async Task<IActionResult> UpdateTestCase(
             string projectId,
@@ -101,11 +143,17 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // PATCH /api/projects/{projectId}/testcases/{testCaseId}/status
-        // Update test case status. Creator or owner only.
-        // draft → active → deprecated
-        // ─────────────────────────────────────────────
+        
+        
+        /// <summary>
+        /// to update a test case status. creater or owner only
+        /// status: draft, active, deprecated
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPatch("{testCaseId}/status")]
         public async Task<IActionResult> UpdateTestCaseStatus(
             string projectId,
@@ -120,10 +168,16 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // PATCH /api/projects/{projectId}/testcases/{testCaseId}/assign
-        // Assign or unassign a tester. Owner or creator only.
-        // ─────────────────────────────────────────────
+        
+        
+        /// <summary>
+        /// to assign or unassign a tester to a test case. owner or creator
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPatch("{testCaseId}/assign")]
         public async Task<IActionResult> AssignTestCase(
             string projectId,
@@ -138,11 +192,14 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // DELETE /api/projects/{projectId}/testcases/{testCaseId}
-        // Delete a test case. Owner or creator only.
-        // Cannot delete if it has existing test runs.
-        // ─────────────────────────────────────────────
+        
+        /// <summary>
+        /// delete a test case. cant delete if it has existing test runs
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpDelete("{testCaseId}")]
         public async Task<IActionResult> DeleteTestCase(
             string projectId,
@@ -156,17 +213,16 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ═════════════════════════════════════════════
-        // TEST RUN ENDPOINTS
-        // Nested under testcases since a run always
-        // belongs to a specific test case.
-        // ═════════════════════════════════════════════
 
-        // ─────────────────────────────────────────────
-        // POST /api/projects/{projectId}/testcases/{testCaseId}/runs
-        // Log a new test run. Any tester or owner can execute.
-        // Test case must be 'active' to be executed.
-        // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Log a new test run. Any tester or owner can execute. Test case must be 'active' to be executed.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPost("{testCaseId}/runs")]
         public async Task<IActionResult> LogTestRun(
             string projectId,
@@ -181,10 +237,15 @@ namespace BugTracker.API.Controllers.v1
             return StatusCode(result.ResponseCode == ResponseCodes.Success.ResponseCode ? 201 : 400, result);
         }
 
-        // ─────────────────────────────────────────────
-        // GET /api/projects/{projectId}/testcases/{testCaseId}/runs
-        // Get all runs for a test case. Any member can view.
-        // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Get all runs for a test case. Any member can view.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="query"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpGet("{testCaseId}/runs")]
         public async Task<IActionResult> GetTestRuns(
             string projectId,
@@ -199,10 +260,16 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // GET /api/projects/{projectId}/testcases/{testCaseId}/runs/{testRunId}
-        // Get a single test run. Any project member can view.
-        // ─────────────────────────────────────────────
+
+
+        /// <summary>
+        ///  Get a single test run. Any project member can view.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="testRunId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpGet("{testCaseId}/runs/{testRunId}")]
         public async Task<IActionResult> GetTestRunById(
             string projectId,
@@ -217,11 +284,17 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // PATCH /api/projects/{projectId}/testcases/{testCaseId}/runs/{testRunId}/link-bug
-        // Link an existing bug to a failed test run after the fact.
-        // The person who logged the run or the owner can do this.
-        // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Link an existing bug to a failed test run after the fact.
+        /// The person who logged the run or the owner can do this
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="testRunId"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpPatch("{testCaseId}/runs/{testRunId}/link-bug")]
         public async Task<IActionResult> LinkBugToRun(
             string projectId,
@@ -237,10 +310,15 @@ namespace BugTracker.API.Controllers.v1
             return Ok(result);
         }
 
-        // ─────────────────────────────────────────────
-        // DELETE /api/projects/{projectId}/testcases/{testCaseId}/runs/{testRunId}
-        // Delete a test run. The person who logged it or the owner can delete.
-        // ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Delete a test run. The person who logged it or the owner can delete.
+        /// </summary>
+        /// <param name="projectId"></param>
+        /// <param name="testCaseId"></param>
+        /// <param name="testRunId"></param>
+        /// <param name="token"></param>
+        /// <returns></returns>
         [HttpDelete("{testCaseId}/runs/{testRunId}")]
         public async Task<IActionResult> DeleteTestRun(
             string projectId,

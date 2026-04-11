@@ -3,9 +3,14 @@ using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using BugTracker.Services.Helpers;
+using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Packaging;
 using MongoDB.Bson;
+using MongoDB.Bson.IO;
 using MongoDB.Driver;
 using Serilog;
+using System.Text;
+using Newtonsoft.Json;
 
 namespace BugTracker.Services.Services
 {
@@ -13,6 +18,7 @@ namespace BugTracker.Services.Services
     {
         // ── Test Cases ──
         Task<ApiResponse<TestCaseResponse>> CreateTestCaseAsync(string actorUserId, string projectId, CreateTestCaseRequest request, CancellationToken token);
+        Task<ApiResponse<object>> GenerateTestCase(string actorUserId, string projectId, GenerateTestCaseReq request, CancellationToken token);
         Task<ApiResponse<PagedTestCasesResponse>> GetTestCasesAsync(string actorUserId, string projectId, GetTestCasesQuery query, CancellationToken token);
         Task<ApiResponse<TestCaseResponse>> GetTestCaseByIdAsync(string actorUserId, string projectId, string testCaseId, CancellationToken token);
         Task<ApiResponse<TestCaseResponse>> UpdateTestCaseAsync(string actorUserId, string projectId, string testCaseId, UpdateTestCaseRequest request, CancellationToken token);
@@ -32,6 +38,7 @@ namespace BugTracker.Services.Services
     {
         private readonly DatabaseContext _db;
         private readonly IResponseHelper _responseHelper;
+        private readonly IAIHelper _aiService;
 
         private static readonly HashSet<string> ValidPriorities = new() { "high", "medium", "low" };
         private static readonly HashSet<string> ValidStatuses = new() { "draft", "active", "deprecated" };
@@ -40,12 +47,68 @@ namespace BugTracker.Services.Services
 
         public TestCaseService(
             DatabaseContext db,
-            IResponseHelper responseHelper
+            IResponseHelper responseHelper,
+            IAIHelper aiService
             )
         {
             _db = db;
             _responseHelper = responseHelper;
+            _aiService = aiService;
         }
+
+
+
+        public async Task<ApiResponse<object>> GenerateTestCase(
+            string actorUserId,
+            string projectId,
+            GenerateTestCaseReq request,
+            CancellationToken token)
+        {
+            try
+            {
+                if (!ObjectId.TryParse(actorUserId, out var actorObjId))
+                    return _responseHelper.Fail<object>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+
+                if (!ObjectId.TryParse(projectId, out var projectObjId))
+                    return _responseHelper.Fail<object>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid project ID format.");
+
+                if (request == null)
+                {
+                    return _responseHelper.Fail<object>(ResponseCodes.EmptyEntryDetected.ResponseCode, "Request is Empty.");
+                }
+
+                string text = request.ProjectOverview;
+                if (request.IsDocUpload)
+                {
+                    var bytes = Convert.FromBase64String(request.FileUpload.Base64File);
+
+                    text = request.FileUpload.FileType switch
+                    {
+                        "pdf" => ExtractPdfText(bytes),
+                        "docx" => ExtractDocxText(bytes),
+                        "xlsx" => ExtractExcelText(bytes),
+                        _ => throw new Exception("Unsupported file type")
+                    };
+                }
+
+                var aiResult = await _aiService.GenerateGeminiTestCases(text);
+                if (aiResult == null)
+                {
+                    Log.Warning("Failed to generate testcases");
+                    return _responseHelper.Fail<object>(ResponseCodes.Failed.ResponseCode, "Failed to generate TestCase");
+                }
+
+                return _responseHelper.Ok(aiResult);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Error generating test case fpr project {ProjectId} by user {UserId}.", projectId, actorUserId);
+                return _responseHelper.SystemError<object>();
+            }
+        }
+
+
+
 
         // ═══════════════════════════════════════════
         // CREATE TEST CASE
@@ -1140,5 +1203,45 @@ namespace BugTracker.Services.Services
             ExecutedAt = run.ExecutedAt
         };
 
+        public string ExtractExcelText(byte[] fileBytes)
+        {
+            using var stream = new MemoryStream(fileBytes);
+            using var workbook = new XLWorkbook(stream);
+
+            var text = new StringBuilder();
+
+            foreach (var sheet in workbook.Worksheets)
+            {
+                foreach (var row in sheet.RowsUsed())
+                {
+                    text.AppendLine(row.Cell(1).Value.ToString());
+                }
+            }
+
+            return text.ToString();
+        }
+
+        public string ExtractDocxText(byte[] fileBytes)
+        {
+            using var stream = new MemoryStream(fileBytes);
+            using var doc = WordprocessingDocument.Open(stream, false);
+
+            return doc.MainDocumentPart.Document.Body.InnerText;
+        }
+
+        public string ExtractPdfText(byte[] fileBytes)
+        {
+            using var stream = new MemoryStream(fileBytes);
+            using var doc = UglyToad.PdfPig.PdfDocument.Open(stream);
+
+            var text = new StringBuilder();
+
+            foreach (var page in doc.GetPages())
+            {
+                text.AppendLine(page.Text);
+            }
+
+            return text.ToString();
+        }
     }
 }

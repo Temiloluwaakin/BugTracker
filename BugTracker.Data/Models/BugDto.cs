@@ -257,6 +257,7 @@ namespace BugTracker.Data.Models
         public string Id { get; set; } = string.Empty;
         public int BugNumber { get; set; }
         public string BugLabel => $"BUG-{BugNumber:D3}";
+        public string Description { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Severity { get; set; } = string.Empty;
         public string Priority { get; set; } = string.Empty;

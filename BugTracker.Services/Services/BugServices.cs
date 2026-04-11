@@ -2,6 +2,7 @@
 using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
+using BugTracker.Services.Helpers;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Serilog;
@@ -38,10 +39,14 @@ namespace BugTracker.Services.Services
 
         // Statuses that mean a bug is fully closed — developer cannot update a closed bug
         private static readonly HashSet<string> TerminalStatuses = new() { "closed", "NotABug", "duplicate" };
+        private readonly IEmailHelper _emailHelper;
 
-        public BugService(DatabaseContext db)
+        public BugService(DatabaseContext db,
+            IEmailHelper emailHelper
+            )
         {
             _db = db;
+            _emailHelper = emailHelper;
         }
 
         
@@ -191,6 +196,21 @@ namespace BugTracker.Services.Services
                     entityTitle: $"BUG-{bugNumber:D3}: {bug.Title}",
                     token: token);
 
+                if (!string.IsNullOrWhiteSpace(request.AssignedDeveloperId))
+                {
+                    var notify = await _emailHelper.SendAsync(new EmailRequest
+                    {
+                        To = assignedDevMember.Email,
+                        Subject = "Bug Assignment",
+                        TextBody = $"Dear {assignedDevMember.FullName}, Bug: {bugNumber} with title: {bug.Title} and description {bug.Description} has been assigned to you",
+                        HtmlBody = null
+                    });
+                    if (notify == null)
+                    {
+                        Log.Warning("Failed to send Login Confirmation mail");
+                    }
+                }
+                
                 Log.Information("Bug {BugLabel} created in project {ProjectId} by user {UserId}.",
                     $"BUG-{bugNumber:D3}", projectId, actorUserId);
 
@@ -769,6 +789,18 @@ namespace BugTracker.Services.Services
 
                     Log.Information("Developer {DevId} assigned to bug {BugLabel} by user {UserId}.",
                         request.DeveloperId, $"BUG-{bug.BugNumber:D3}", actorUserId);
+
+                    var notify = await _emailHelper.SendAsync(new EmailRequest
+                    {
+                        To = devMember.Email,
+                        Subject = "Bug Assignment",
+                        TextBody = $"Dear {devMember.FullName}, Bug: {bug.BugNumber} with title: {bug.Title} and description {bug.Description} has been assigned to you",
+                        HtmlBody = null
+                    });
+                    if (notify == null)
+                    {
+                        Log.Warning("Failed to send Login Confirmation mail");
+                    }
                 }
 
                 var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
@@ -860,6 +892,19 @@ namespace BugTracker.Services.Services
                 Log.Information("Bug {BugLabel} reassigned from tester '{Old}' to '{New}' by user {UserId}.",
                     $"BUG-{bug.BugNumber:D3}", bug.AssignedTesterName, newTesterMember.FullName, actorUserId);
 
+
+                var notify = await _emailHelper.SendAsync(new EmailRequest
+                {
+                    To = newTesterMember.Email,
+                    Subject = "Bug Assignment",
+                    TextBody = $"Dear {newTesterMember.FullName}, Bug: {bug.BugNumber} with title: {bug.Title} and description {bug.Description} has been assigned to you",
+                    HtmlBody = null
+                });
+                if (notify == null)
+                {
+                    Log.Warning("Failed to send Login Confirmation mail");
+                }
+
                 var updated = await _db.Bugs.Find(b => b.Id == bugId).FirstOrDefaultAsync(token);
                 return Ok(MapToBugResponse(updated!));
             }
@@ -889,6 +934,9 @@ namespace BugTracker.Services.Services
                 if (project is null || bug is null) return Fail<bool>(ResponseCodes.NoRecordReturned.ResponseCode, "Bug or project not found.");
 
                 var member = project.Members.First(m => m.UserId == actorUserId);
+                var owner = project.Members.First(m => m.Role == ProjectRole.Owner);
+                var otherMembers = project.Members.Where(m => m.Role != ProjectRole.Owner).ToList();
+                var ccEmails = otherMembers.Select(m => m.Email).ToList();
 
                 var comment = new Comment
                 {
@@ -904,6 +952,19 @@ namespace BugTracker.Services.Services
                 };
 
                 await _db.Comments.InsertOneAsync(comment, cancellationToken: token);
+
+                var notify = await _emailHelper.SendAsync(new EmailRequest
+                {
+                    To = owner.Email,
+                    BCC = ccEmails,
+                    Subject = "Comment Added",
+                    TextBody = $"Comment Added on Bug: {bug.BugNumber} with title: {bug.Title} and description {bug.Description}. Comment: {request.Content}",
+                    HtmlBody = null
+                });
+                if (notify == null)
+                {
+                    Log.Warning("Failed to send Comment mail");
+                }
 
                 return Ok(true);
             }
@@ -1344,6 +1405,7 @@ namespace BugTracker.Services.Services
             Id = bug.Id.ToString(),
             BugNumber = bug.BugNumber,
             Title = bug.Title,
+            Description = bug.Description,
             Severity = bug.Severity.ToString(),
             Priority = bug.Priority.ToString(),
             Status = bug.Status.ToString(),

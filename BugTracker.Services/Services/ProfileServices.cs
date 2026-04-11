@@ -76,28 +76,28 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 // Validate enums if provided
                 if (request.AvailabilityStatus is not null &&
                     !ValidAvailabilities.Contains(request.AvailabilityStatus))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         $"Invalid availability status. Allowed: {string.Join(", ", ValidAvailabilities)}.");
 
                 if (request.EmploymentTypePreference is not null &&
                     !ValidEmploymentTypes.Contains(request.EmploymentTypePreference))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         $"Invalid employment type. Allowed: {string.Join(", ", ValidEmploymentTypes)}.");
 
                 if (request.WorkTypePreference is not null &&
                     !ValidWorkTypes.Contains(request.WorkTypePreference))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         $"Invalid work type. Allowed: {string.Join(", ", ValidWorkTypes)}.");
 
                 // Fetch the user for denormalised fields
                 var user = await _db.Users.Find(u => u.Id == actorUserId).FirstOrDefaultAsync(token);
                 if (user is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "User account not found.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "User account not found.");
 
                 // Check if profile already exists
                 var existing = await _db.TesterProfiles
@@ -118,13 +118,24 @@ namespace BugTracker.Services.Services
                         Bio = request.Bio?.Trim(),
                         YearsOfExperience = request.YearsOfExperience,
                         Skills = SanitiseSkills(request.Skills),
-                        AvailabilityStatus = request.AvailabilityStatus ?? "not_looking",
+                        AvailabilityStatus = request.AvailabilityStatus ?? "notLooking",
                         EmploymentTypePreference = request.EmploymentTypePreference ?? "both",
                         WorkTypePreference = request.WorkTypePreference ?? "remote",
                         RateOrSalaryExpectation = request.RateOrSalaryExpectation?.Trim(),
                         SocialLinks = MapSocialLinks(request.SocialLinks),
                         IsPublic = request.IsPublic ?? true,
-                        PortfolioItems = new List<PortfolioItem>(),
+                        PortfolioItems = request.Experience?
+                            .Take(20)
+                            .Select(p => new PortfolioItem
+                            {
+                                ItemId = ObjectId.GenerateNewId(),
+                                ProjectName = p.ProjectName.Trim(),
+                                Role = p.Role.Trim(),
+                                Description = p.Description.Trim(),
+                                Link = p.Link?.Trim(),
+                                Duration = FormatDuration(p.StartDate, p.EndDate)
+                            })
+                            .ToList() ?? new List<PortfolioItem>(),
                         CreatedAt = now,
                         UpdatedAt = now
                     };
@@ -175,7 +186,7 @@ namespace BugTracker.Services.Services
                     updates.Add(Builders<TesterProfile>.Update.Set(p => p.UpdatedAt, now));
 
                     if (updates.Count == 3) // only the sync fields — nothing meaningful changed
-                        _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "No valid fields provided to update.");
+                        return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "No valid fields provided to update.");
 
                     await _db.TesterProfiles.UpdateOneAsync(
                         p => p.UserId == actorObjId,
@@ -205,14 +216,14 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 var profile = await _db.TesterProfiles
                     .Find(p => p.UserId == actorObjId && p.ProfileStatus == profileStatus.active.ToString())
                     .FirstOrDefaultAsync(token);
 
                 if (profile is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
                         "You don't have a profile yet. Create one to appear in the Jobs tab.");
 
                 return Ok(MapToProfileResponse(profile));
@@ -236,22 +247,22 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out _))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 if (!ObjectId.TryParse(targetUserId, out var targetObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid target user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid target user ID format.");
 
                 var profile = await _db.TesterProfiles
                     .Find(p => p.UserId == targetObjId && p.ProfileStatus == profileStatus.active.ToString())
                     .FirstOrDefaultAsync(token);
 
                 if (profile is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "This user does not have a profile.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "This user does not have a profile.");
 
                 // If the viewer is looking at someone else's profile,
                 // only show it if it's public
                 if (actorUserId != targetUserId && !profile.IsPublic)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
                         "This profile is not publicly visible.");
 
                 return Ok(MapToProfileResponse(profile));
@@ -276,7 +287,7 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out _))
-                    _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 var fb = Builders<TesterProfile>.Filter;
                 var filters = new List<FilterDefinition<TesterProfile>>
@@ -293,7 +304,7 @@ namespace BugTracker.Services.Services
                 if (!string.IsNullOrWhiteSpace(query.AvailabilityStatus))
                 {
                     if (!SearchableAvailabilities.Contains(query.AvailabilityStatus))
-                        _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        return _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                             "Availability filter must be 'open' or 'busy'.");
 
                     filters.Add(fb.Eq(p => p.AvailabilityStatus, query.AvailabilityStatus));
@@ -306,7 +317,7 @@ namespace BugTracker.Services.Services
                 if (!string.IsNullOrWhiteSpace(query.EmploymentType))
                 {
                     if (!ValidEmploymentTypes.Contains(query.EmploymentType))
-                        _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        return _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                             $"Invalid employment type filter. Allowed: {string.Join(", ", ValidEmploymentTypes)}.");
 
                     // Match "both" preference alongside the specific type requested
@@ -319,7 +330,7 @@ namespace BugTracker.Services.Services
                 if (!string.IsNullOrWhiteSpace(query.WorkType))
                 {
                     if (!ValidWorkTypes.Contains(query.WorkType))
-                        _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                        return _responseHelper.Fail<PagedProfilesResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                             $"Invalid work type filter. Allowed: {string.Join(", ", ValidWorkTypes)}.");
 
                     filters.Add(fb.Eq(p => p.WorkTypePreference, query.WorkType));
@@ -376,20 +387,24 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 var profile = await _db.TesterProfiles
                     .Find(p => p.UserId == actorObjId && p.ProfileStatus == profileStatus.active.ToString())
                     .FirstOrDefaultAsync(token);
 
                 if (profile is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
                         "Create your profile before adding portfolio items.");
 
                 // Max 20 portfolio items — keeps profiles focused
                 if (profile.PortfolioItems.Count >= 20)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         "You can have a maximum of 20 portfolio items.");
+
+                var duration = request.EndDate.HasValue
+                    ? $"{request.StartDate:yyyy-MM-dd} - {request.EndDate:yyyy-MM-dd}"
+                    : $"{request.StartDate:yyyy-MM-dd} - present";
 
                 var item = new PortfolioItem
                 {
@@ -398,7 +413,7 @@ namespace BugTracker.Services.Services
                     Role = request.Role.Trim(),
                     Description = request.Description.Trim(),
                     Link = request.Link?.Trim(),
-                    Duration = request.Duration?.Trim()
+                    Duration = duration.Trim()
                 };
 
                 var update = Builders<TesterProfile>.Update.Combine(
@@ -430,21 +445,21 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 if (!ObjectId.TryParse(itemId, out var itemObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid portfolio item ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid portfolio item ID format.");
 
                 var profile = await _db.TesterProfiles
                     .Find(p => p.UserId == actorObjId && p.ProfileStatus == profileStatus.active.ToString())
                     .FirstOrDefaultAsync(token);
 
                 if (profile is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
 
                 var item = profile.PortfolioItems.FirstOrDefault(i => i.ItemId == itemObjId);
                 if (item is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Portfolio item not found.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Portfolio item not found.");
 
                 // Apply partial updates to the in-memory item then replace the whole array.
                 // MongoDB's positional operator on nested arrays requires arrayFilters which is
@@ -483,21 +498,21 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 if (!ObjectId.TryParse(itemId, out var itemObjId))
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid portfolio item ID format.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid portfolio item ID format.");
 
                 var profile = await _db.TesterProfiles
                     .Find(p => p.UserId == actorObjId && p.ProfileStatus == profileStatus.active.ToString())
                     .FirstOrDefaultAsync(token);
 
                 if (profile is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
 
                 var item = profile.PortfolioItems.FirstOrDefault(i => i.ItemId == itemObjId);
                 if (item is null)
-                    _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Portfolio item not found.");
+                    return _responseHelper.Fail<TesterProfileResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Portfolio item not found.");
 
                 var update = Builders<TesterProfile>.Update.Combine(
                     Builders<TesterProfile>.Update.PullFilter(p => p.PortfolioItems, i => i.ItemId == itemObjId),
@@ -526,12 +541,12 @@ namespace BugTracker.Services.Services
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    _responseHelper.Fail<object>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<object>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 var result = await _db.TesterProfiles.FindAsync(p => p.UserId == actorObjId && p.ProfileStatus == profileStatus.active.ToString());
 
                 if (result is null)
-                    _responseHelper.Fail<object>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
+                    return _responseHelper.Fail<object>(ResponseCodes.NoRecordReturned.ResponseCode, "Profile not found.");
 
 
                 var update = Builders<TesterProfile>.Update.Combine(
@@ -604,6 +619,13 @@ namespace BugTracker.Services.Services
             CreatedAt = p.CreatedAt,
             UpdatedAt = p.UpdatedAt
         };
+
+        private string FormatDuration(DateTime startDate, DateTime? endDate)
+        {
+            return endDate.HasValue
+                ? $"{startDate:yyyy-MM-dd} - {endDate:yyyy-MM-dd}"
+                : $"{startDate:yyyy-MM-dd} - present";
+        }
 
         private static ProfileCardResponse MapToProfileCard(TesterProfile p) => new()
         {

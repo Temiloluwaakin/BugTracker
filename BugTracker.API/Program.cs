@@ -54,6 +54,8 @@ builder.Services.AddSingleton<IMongoDatabase>(sp =>
     return client.GetDatabase(settings.DatabaseName);
 });
 
+builder.Services.Configure<AppConfig>(builder.Configuration.GetSection("AppConfig"));
+builder.Services.Configure<Gemini>(builder.Configuration.GetSection("Gemini"));
 
 builder.Services.AddScoped<DatabaseContext>();
 
@@ -67,7 +69,11 @@ builder.Services.AddScoped<ITestCaseService, TestCaseService>();
 builder.Services.AddScoped<IResponseHelper, ResponseHelper>();
 builder.Services.AddScoped<IChatService, ChatServices>();
 builder.Services.AddScoped<IProfileService, ProfileService>();
+builder.Services.AddScoped<IAIHelper, AIHelper>();
+builder.Services.AddScoped<IEmailHelper, EmailHelper>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+builder.Services.AddHttpClient<AIHelper>();
 
 //api versioning
 builder.Services.AddApiVersioning(
@@ -91,6 +97,11 @@ builder.Services.AddSwaggerGen(options =>
 });
 builder.Services.AddSignalR();// Register SignalR
 
+builder.Services.AddHttpClient("OpenAI", client =>
+{
+    client.BaseAddress = new Uri("https://api.openai.com/v1/");
+    client.DefaultRequestHeaders.Add("Authorization", $"Bearer {builder.Configuration["OpenAI:ApiKey"]}");
+});
 
 //port for render
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";

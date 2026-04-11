@@ -7,9 +7,38 @@ using System.Threading.Tasks;
 
 namespace BugTracker.Data.Models
 {
-    // ─────────────────────────────────────────────
+    public class GenerateTestCaseReq
+    {
+        public string ProjectOverview { get; set; }
+        public bool IsDocUpload { get; set; }
+        public FileUploadRequest? FileUpload { get; set; }
+    }
+
+    public class FileUploadRequest
+    {
+        public string Base64File { get; set; }
+
+        public string FileType { get; set; }
+    }
+
+    public class GeneratedTestCase
+    {
+        public string Title { get; set; }
+        public string Description { get; set; }
+        public string Preconditions { get; set; }
+        public List<AIStep> Steps { get; set; }
+        public string ExpectedResult { get; set; }
+        public string Priority { get; set; }
+        public List<string> Tags { get; set; }
+    }
+
+    public class AIStep
+    {
+        public string Action { get; set; }
+        public string ExpectedOutcome { get; set; }
+    }
+
     // CREATE TEST CASE
-    // ─────────────────────────────────────────────
     public class CreateTestCaseRequest
     {
         [Required(ErrorMessage = "Title is required.")]

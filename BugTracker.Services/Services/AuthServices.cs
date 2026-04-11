@@ -18,11 +18,13 @@ namespace BugTracker.Services.Services
     {
         private readonly DatabaseContext _db;
         private readonly IAuthHelpers _authHelpers;
+        private readonly IEmailHelper _emailHelper;
 
-        public AuthServices(DatabaseContext db, IAuthHelpers authHelpers)
+        public AuthServices(DatabaseContext db, IAuthHelpers authHelpers, IEmailHelper emailHelper)
         {
             _db = db;
             _authHelpers = authHelpers;
+            _emailHelper = emailHelper;
         }
 
 
@@ -64,6 +66,10 @@ namespace BugTracker.Services.Services
                 await _db.Users.InsertOneAsync(user);
 
                 // 4. Check for pending invitations and process them
+                if (!string.IsNullOrWhiteSpace(request.InviteToken))
+                {
+                    await RedeemInviteDuringSignupAsync(user, request.InviteToken);
+                }
                 await ProcessPendingInvitationsAsync(user);
 
                 // 5. Issue a JWT
@@ -176,6 +182,67 @@ namespace BugTracker.Services.Services
             }
         }
 
+
+        private async Task RedeemInviteDuringSignupAsync(User user, string token)
+        {
+            var invite = await _db.Invitations
+                .Find(i => i.Token == token)
+                .FirstOrDefaultAsync();
+
+            if (invite == null)
+            {
+                Log.Warning("Invalid invite token used during signup");
+                return;
+            }
+
+            if (invite.Status != InvitationStatus.Pending)
+            {
+                Log.Warning("Invite already used");
+                return;
+            }
+
+            if (invite.ExpiresAt < DateTime.UtcNow)
+            {
+                Log.Warning("Invite expired");
+                return;
+            }
+
+            if (invite.InvitedEmail != user.Email)
+            {
+                Log.Warning("Invite email mismatch");
+                return;
+            }
+
+            //Add user to project
+            var member = new ProjectMember
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                FullName = user.FullName,
+                Role = invite.Role,
+                JoinedAt = DateTime.UtcNow,
+                AddedBy = invite.InvitedBy
+            };
+
+            var update = Builders<Project>.Update
+                .Push(p => p.Members, member)
+                .Set(p => p.UpdatedAt, DateTime.UtcNow);
+
+            await _db.Projects.UpdateOneAsync(
+                p => p.Id == invite.ProjectId,
+                update);
+
+            //Mark invite as used
+            var inviteUpdate = Builders<Invitation>.Update
+                .Set(i => i.Status, InvitationStatus.Accepted);
+
+            await _db.Invitations.UpdateOneAsync(
+                i => i.Id == invite.Id,
+                inviteUpdate);
+
+            Log.Information("User {UserId} joined project {ProjectId} via invite",
+                user.Id, invite.ProjectId);
+        }
 
         private ApiResponse<AuthResponse> BuildAuthResponse(User user)
         {
