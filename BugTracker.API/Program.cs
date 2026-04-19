@@ -71,6 +71,7 @@ builder.Services.AddScoped<IChatService, ChatServices>();
 builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddScoped<IAIHelper, AIHelper>();
 builder.Services.AddScoped<IEmailHelper, EmailHelper>();
+builder.Services.AddScoped<IDmService, DmService>();
 builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
 builder.Services.AddHttpClient<AIHelper>();
@@ -213,6 +214,7 @@ app.UseCors("_myAllowSpecificOrigins");
 app.UseAuthentication(); // Must come before UseAuthorization
 app.UseAuthorization();
 app.MapHub<ChatHub>("/hubs/chat");   // This is the WebSocket endpoint the client connects to
+app.MapHub<DMHub>("/hubs/dm");   // This is the WebSocket endpoint the client connects to
 app.MapControllers();
 app.Run();
 

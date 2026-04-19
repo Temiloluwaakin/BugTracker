@@ -70,8 +70,6 @@ namespace BugTracker.Data.Entities
     // DIRECT MESSAGE
     // One document per message. Never embedded in the conversation
     // document — DMs can grow unbounded.
-    //
-    // NOT YET ACTIVE on the frontend — entity is built and ready.
     // ═══════════════════════════════════════════════════════════
     public class DirectMessage
     {
@@ -92,6 +90,15 @@ namespace BugTracker.Data.Entities
 
         [BsonElement("content")]
         public string Content { get; set; } = string.Empty;
+
+        [BsonElement("replyToId")]
+        [BsonIgnoreIfNull]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public ObjectId? ReplyToId { get; set; }
+
+        [BsonElement("replyToSnippet")]
+        [BsonIgnoreIfNull]
+        public string? ReplyToSnippet { get; set; }
 
         [BsonElement("isEdited")]
         public bool IsEdited { get; set; } = false;

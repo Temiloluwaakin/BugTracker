@@ -65,13 +65,13 @@ namespace BugTracker.API.Controllers.v1
         [HttpPost]
         public async Task<IActionResult> CreateTestCase(
             string projectId,
-            [FromBody] CreateTestCaseRequest request,
+            [FromBody] List<CreateTestCaseRequest> request,
             CancellationToken token)
         {
             var userId = GetCurrentUserId();
             if (userId is null) return UnauthorizedResponse();
 
-            var result = await _testCaseService.CreateTestCaseAsync(userId, projectId, request, token);
+            var result = await _testCaseService.CreateTestCasesAsync(userId, projectId, request, token);
             return StatusCode(result.ResponseCode == ResponseCodes.Success.ResponseCode ? 201 : 400, result);
         }
 

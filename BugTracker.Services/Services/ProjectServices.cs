@@ -3,6 +3,8 @@ using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using BugTracker.Services.Helpers;
+using DocumentFormat.OpenXml.Office2016.Excel;
+using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using Serilog;
@@ -27,6 +29,7 @@ namespace BugTracker.Services.Services
 
     public class ProjectServices : IProjectService
     {
+        private readonly ILogger<ProjectServices> _logger;
         private readonly DatabaseContext _db;
         private readonly IEmailHelper _emailHelper;
 
@@ -34,10 +37,11 @@ namespace BugTracker.Services.Services
         private static readonly HashSet<string> ValidInviteRoles = new() { "tester", "viewer", "developer"};
         private static readonly HashSet<string> ValidUpdateRoles = new() { "tester", "viewer", "developer" };
 
-        public ProjectServices(DatabaseContext db,
+        public ProjectServices(ILogger<ProjectServices> logger ,DatabaseContext db,
             IEmailHelper emailHelper
             )
         {
+            _logger = logger;
             _db = db;
             _emailHelper = emailHelper;
         }
@@ -48,13 +52,13 @@ namespace BugTracker.Services.Services
         {
             try
             {
-                Log.Information("about to create a project by user: {actoruserid} with request {request}", actorUserId, request);
+                _logger.LogInformation("about to create a project by user: {actoruserid} with request {@request}", actorUserId, request);
 
                 // 1. Resolve the acting user — we need their display info for the members embed
                 var actor = await _db.Users.Find(u => u.Id == actorUserId).FirstOrDefaultAsync(token);
                 if (actor is null)
                 {
-                    Log.Warning("CreateProject: acting user {UserId} not found in database.", actorUserId);
+                    _logger.LogWarning("CreateProject: acting user {UserId} not found in database.", actorUserId);
                     return new ApiResponse<ProjectResponse>
                     {
                         ResponseCode = ResponseCodes.NoRecordReturned.ResponseCode,
@@ -64,7 +68,7 @@ namespace BugTracker.Services.Services
 
                 if (!TryParseEnum<ProjectPriorities>(request.ProjectPriority, out var priority))
                 {
-                    Log.Warning("invalid project priority detected");
+                    _logger.LogWarning("invalid project priority detected");
                     return new ApiResponse<ProjectResponse>
                     {
                         ResponseCode = ResponseCodes.InvalidEntryDetected.ResponseCode,
@@ -130,7 +134,7 @@ namespace BugTracker.Services.Services
 
                         if (!TryParseEnum<ProjectRole>(reqMember.Role, out var role))
                         {
-                            Log.Warning("Invalid role '{Role}' supplied for {Email}", reqMember.Role, reqMember.Email);
+                            _logger.LogWarning("Invalid role '{Role}' supplied for {Email}", reqMember.Role, reqMember.Email);
                             continue;
                         }
 
@@ -173,7 +177,7 @@ namespace BugTracker.Services.Services
                     {
                         if (!TryParseEnum<ProjectRole>(user.Role, out var role))
                         {
-                            Log.Warning("Invalid role '{Role}' supplied for {Email}", user.Role, user.Email);
+                            _logger.LogWarning("Invalid role '{Role}' supplied for {Email}", user.Role, user.Email);
                             continue;
                         }
 
@@ -224,15 +228,15 @@ namespace BugTracker.Services.Services
                 });
                 if (notify == null)
                 {
-                    Log.Warning("Failed to send Login Confirmation mail");
+                    _logger.LogWarning("Failed to send Login Confirmation mail");
                 };
 
-                Log.Information("Project {ProjectId} '{Name}' created by user {UserId}.", project.Id, project.Name, actorUserId);
+                _logger.LogInformation("Project {ProjectId} '{Name}' created by user {UserId}.", project.Id, project.Name, actorUserId);
                 return Ok(MapToProjectResponse(project));
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error creating project for user {UserId}.", actorUserId);
+                _logger.LogError(ex, "Error creating project for user {UserId}.", actorUserId);
                 return SystemError<ProjectResponse>();
             }
         }
@@ -248,6 +252,8 @@ namespace BugTracker.Services.Services
         {
             try
             {
+                _logger.LogInformation("getting logged in user projects for email: {email}", actorUserId);
+
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
                     return Fail<List<ProjectSummaryResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
@@ -321,11 +327,12 @@ namespace BugTracker.Services.Services
                     };
                 }).ToList();
 
+                _logger.LogInformation("successfully returned logged in user projects for email: {email}", actorUserId);
                 return Ok(summaries);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error fetching projects for user {UserId}.", actorUserId);
+                _logger.LogError(ex, "Error fetching projects for user {UserId}.", actorUserId);
                 return SystemError<List<ProjectSummaryResponse>>();
             }
         }
@@ -342,6 +349,8 @@ namespace BugTracker.Services.Services
         {
             try
             {
+                _logger.LogInformation("getting projects by id for user: {user}, and project {project}", actorUserId, projectId);
+
                 // 1. Validate IDs
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
                     return Fail<ProjectResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
@@ -366,7 +375,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error fetching project {ProjectId} for user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error fetching project {ProjectId} for user {UserId}.", projectId, actorUserId);
                 return SystemError<ProjectResponse>();
             }
         }
@@ -406,7 +415,7 @@ namespace BugTracker.Services.Services
                 // 3. Only the owner can update project metadata
                 if (project.OwnerId != actorUserId)
                 {
-                    Log.Warning("UpdateProject: user {UserId} attempted to update project {ProjectId} but is not owner.",
+                    _logger.LogWarning("UpdateProject: user {UserId} attempted to update project {ProjectId} but is not owner.",
                         actorUserId, projectId);
                     return Fail<ProjectResponse>(ResponseCodes.UnAuthorized.ResponseCode, "Only the project owner can update project details.");
                 }
@@ -461,13 +470,13 @@ namespace BugTracker.Services.Services
                     entityTitle: updated!.Name,
                     token: token);
 
-                Log.Information("Project {ProjectId} updated by owner {UserId}.", projectId, actorUserId);
+                _logger.LogInformation("Project {ProjectId} updated by owner {UserId}.", projectId, actorUserId);
 
                 return Ok(MapToProjectResponse(updated));
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error updating project {ProjectId} for user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error updating project {ProjectId} for user {UserId}.", projectId, actorUserId);
                 return SystemError<ProjectResponse>();
             }
         }
@@ -500,7 +509,7 @@ namespace BugTracker.Services.Services
                 // Only owner can delete
                 if (project.OwnerId != actorUserId)
                 {
-                    Log.Warning("DeleteProject: user {UserId} attempted to delete project {ProjectId} but is not owner.",
+                    _logger.LogWarning("DeleteProject: user {UserId} attempted to delete project {ProjectId} but is not owner.",
                         actorUserId, projectId);
                     return Fail<object>(ResponseCodes.UnAuthorized.ResponseCode, "Only the project owner can delete this project.");
                 }
@@ -525,13 +534,13 @@ namespace BugTracker.Services.Services
                     entityTitle: project.Name,
                     token: token);
 
-                Log.Information("Project {ProjectId} archived by owner {UserId}.", projectId, actorUserId);
+                _logger.LogInformation("Project {ProjectId} archived by owner {UserId}.", projectId, actorUserId);
 
                 return Ok<object>(null, "Project has been archived successfully.");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error deleting project {ProjectId} for user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error deleting project {ProjectId} for user {UserId}.", projectId, actorUserId);
                 return SystemError<object>();
             }
         }
@@ -647,10 +656,10 @@ namespace BugTracker.Services.Services
                     });
                     if (notify == null)
                     {
-                        Log.Warning("Failed to send Login Confirmation mail");
+                        _logger.LogWarning("Failed to send Login Confirmation mail");
                     }
 
-                    Log.Information("User {InvitedUserId} directly added to project {ProjectId} by owner {OwnerId}.",
+                    _logger.LogInformation("User {InvitedUserId} directly added to project {ProjectId} by owner {OwnerId}.",
                         existingUser.Id, projectId, actorUserId);
 
                     return Ok<object>(null, $"{existingUser.FullName} has been added to the project as {role}.");
@@ -682,7 +691,7 @@ namespace BugTracker.Services.Services
                     });
                     if (notify == null)
                     {
-                        Log.Warning("Failed to send Login Confirmation mail");
+                        _logger.LogWarning("Failed to send Login Confirmation mail");
                     }
 
                     await LogActivityAsync(
@@ -696,7 +705,7 @@ namespace BugTracker.Services.Services
                         metadata: new Dictionary<string, string> { { "role", role }, { "email", invitedEmail } },
                         token: token);
 
-                    Log.Information("Invitation sent to {Email} for project {ProjectId} by owner {OwnerId}.",
+                    _logger.LogInformation("Invitation sent to {Email} for project {ProjectId} by owner {OwnerId}.",
                         invitedEmail, projectId, actorUserId);
 
                     return Ok<object>(null, $"Invitation sent to {invitedEmail}. They have 7 days to accept.");
@@ -704,7 +713,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error inviting member to project {ProjectId} by user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error inviting member to project {ProjectId} by user {UserId}.", projectId, actorUserId);
                 return SystemError<object>();
             }
         }
@@ -801,7 +810,7 @@ namespace BugTracker.Services.Services
                     },
                     token: token);
 
-                Log.Information(
+                _logger.LogInformation(
                     "Member {TargetUserId} role changed from '{OldRole}' to '{NewRole}' in project {ProjectId} by owner {OwnerId}.",
                     targetUserId, targetMember.Role, newRole, projectId, actorUserId);
 
@@ -809,7 +818,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error updating member role in project {ProjectId} by user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error updating member role in project {ProjectId} by user {UserId}.", projectId, actorUserId);
                 return SystemError<object>();
             }
         }
@@ -882,14 +891,14 @@ namespace BugTracker.Services.Services
                     entityTitle: targetMember.FullName,
                     token: token);
 
-                Log.Information("Member {TargetUserId} removed from project {ProjectId} by owner {OwnerId}.",
+                _logger.LogInformation("Member {TargetUserId} removed from project {ProjectId} by owner {OwnerId}.",
                     targetUserId, projectId, actorUserId);
 
                 return Ok<object>(null, $"{targetMember.FullName} has been removed from the project.");
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error removing member from project {ProjectId} by user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error removing member from project {ProjectId} by user {UserId}.", projectId, actorUserId);
                 return SystemError<object>();
             }
         }
@@ -944,7 +953,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error fetching members for project {ProjectId} by user {UserId}.", projectId, actorUserId);
+                _logger.LogError(ex, "Error fetching members for project {ProjectId} by user {UserId}.", projectId, actorUserId);
                 return SystemError<List<MemberResponse>>();
             }
         }
@@ -1033,7 +1042,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex,
+                _logger.LogError(ex,
                     "Error fetching activities for project {ProjectId} by user {UserId}.",
                     projectId,
                     actorUserId);
@@ -1148,7 +1157,7 @@ namespace BugTracker.Services.Services
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error fetching bug metrics for project {ProjectId}", projectId);
+                _logger.LogError(ex, "Error fetching bug metrics for project {ProjectId}", projectId);
                 return SystemError<BugMetricsResponse>();
             }
         }
@@ -1193,7 +1202,7 @@ namespace BugTracker.Services.Services
             catch (Exception ex)
             {
                 // Activity logging must never break the main flow
-                Log.Error(ex, "Failed to write activity log for action '{Action}' on project {ProjectId}.",
+                _logger.LogError(ex, "Failed to write activity log for action '{Action}' on project {ProjectId}.",
                     action, projectId);
             }
         }

@@ -3,8 +3,9 @@ using BugTracker.Data.Context;
 using BugTracker.Data.Entities;
 using BugTracker.Data.Models;
 using BugTracker.Services.Helpers;
+using DocumentFormat.OpenXml.Office2016.Excel;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
-using Serilog;
 
 namespace BugTracker.Services.Services
 {
@@ -16,12 +17,14 @@ namespace BugTracker.Services.Services
 
     public class AuthServices : IAuthService
     {
+        private readonly ILogger<AuthServices> _logger;
         private readonly DatabaseContext _db;
         private readonly IAuthHelpers _authHelpers;
         private readonly IEmailHelper _emailHelper;
 
-        public AuthServices(DatabaseContext db, IAuthHelpers authHelpers, IEmailHelper emailHelper)
+        public AuthServices(ILogger<AuthServices> logger,DatabaseContext db, IAuthHelpers authHelpers, IEmailHelper emailHelper)
         {
+            _logger = logger;
             _db = db;
             _authHelpers = authHelpers;
             _emailHelper = emailHelper;
@@ -32,6 +35,7 @@ namespace BugTracker.Services.Services
         {
             try
             {
+                _logger.LogInformation("sing up initiated for email: {email}", request.Email);
                 var email = request.Email;
 
                 // 1. Check if email is already taken
@@ -39,7 +43,7 @@ namespace BugTracker.Services.Services
 
                 if (existing != null)
                 {
-                    Log.Information("The Account already exist with this mail {mail}", request.Email);
+                    _logger.LogInformation("The Account already exist with this mail {mail}", request.Email);
                     return new ApiResponse<AuthResponse>
                     {
                         ResponseCode = ResponseCodes.DuplicateRecord.ResponseCode,
@@ -64,6 +68,8 @@ namespace BugTracker.Services.Services
                 };
 
                 await _db.Users.InsertOneAsync(user);
+                _logger.LogInformation("inserted into the db, checking for pending invitation for {email}", request.Email);
+
 
                 // 4. Check for pending invitations and process them
                 if (!string.IsNullOrWhiteSpace(request.InviteToken))
@@ -73,11 +79,12 @@ namespace BugTracker.Services.Services
                 await ProcessPendingInvitationsAsync(user);
 
                 // 5. Issue a JWT
+                _logger.LogInformation("successfullt signed up for email: {email}", request.Email);
                 return BuildAuthResponse(user);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error during user registration for email {Email}", request.Email);
+                _logger.LogError(ex, "Error during user registration for email {Email}", request.Email);
                 return new ApiResponse<AuthResponse>
                 {
                     ResponseCode = ResponseCodes.SystemMalfunction.ResponseCode,
@@ -93,6 +100,8 @@ namespace BugTracker.Services.Services
         {
             try
             {
+                _logger.LogInformation("login initiated for email: {email}", request.Email);
+
                 var email = request.Email.Trim().ToLowerInvariant();
 
                 // 1. Find user by email
@@ -100,7 +109,7 @@ namespace BugTracker.Services.Services
 
                 if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
                 {
-                    Log.Information("Invalid Credentials inputed for email: {email}", request.Email);
+                    _logger.LogWarning("Invalid Credentials inputed for email: {email}", request.Email);
                     return new ApiResponse<AuthResponse>
                     {
                         ResponseCode = ResponseCodes.UnAuthorized.ResponseCode,
@@ -115,12 +124,13 @@ namespace BugTracker.Services.Services
 
                 user.LastLoginAt = DateTime.UtcNow;
 
+                _logger.LogInformation("login successfully for email: {email}", request.Email);
                 // 3. Issue a JWT
                 return BuildAuthResponse(user);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error during user login for email {Email}", request.Email);
+                _logger.LogError(ex, "Error during user login for email {Email}", request.Email);
                 return new ApiResponse<AuthResponse>
                 {
                     ResponseCode = ResponseCodes.SystemMalfunction.ResponseCode,
@@ -148,6 +158,7 @@ namespace BugTracker.Services.Services
 
                 foreach (var invite in pendingInvites)
                 {
+                    _logger.LogInformation("found {counr} pending invite for {email}", pendingInvites.Count, user.Email);
                     // Add user to the project's members array
                     var newMember = new ProjectMember
                     {
@@ -173,43 +184,46 @@ namespace BugTracker.Services.Services
                     await _db.Invitations.UpdateOneAsync(i => i.Id == invite.Id, inviteUpdate);
                 }
 
+                _logger.LogInformation("completed pending invite for email: {email}", user.Email);
                 return;
             
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error processing pending invitation for email {Email}", user.Email);
+                _logger.LogError(ex, "Error processing pending invitation for email {Email}", user.Email);
             }
         }
 
 
         private async Task RedeemInviteDuringSignupAsync(User user, string token)
         {
+            _logger.LogInformation("has an invite token redeeming it for email: {email} and token {token}", user.Email, token);
+
             var invite = await _db.Invitations
                 .Find(i => i.Token == token)
                 .FirstOrDefaultAsync();
 
             if (invite == null)
             {
-                Log.Warning("Invalid invite token used during signup");
+                _logger.LogWarning("Invalid invite token used during signup");
                 return;
             }
 
             if (invite.Status != InvitationStatus.Pending)
             {
-                Log.Warning("Invite already used");
+                _logger.LogWarning("Invite already used");
                 return;
             }
 
             if (invite.ExpiresAt < DateTime.UtcNow)
             {
-                Log.Warning("Invite expired");
+                _logger.LogWarning("Invite expired");
                 return;
             }
 
             if (invite.InvitedEmail != user.Email)
             {
-                Log.Warning("Invite email mismatch");
+                _logger.LogWarning("Invite email mismatch");
                 return;
             }
 
@@ -240,7 +254,7 @@ namespace BugTracker.Services.Services
                 i => i.Id == invite.Id,
                 inviteUpdate);
 
-            Log.Information("User {UserId} joined project {ProjectId} via invite",
+            _logger.LogInformation("User {UserId} joined project {ProjectId} via invite",
                 user.Id, invite.ProjectId);
         }
 

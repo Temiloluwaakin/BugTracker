@@ -17,7 +17,7 @@ namespace BugTracker.Services.Services
     public interface ITestCaseService
     {
         // ── Test Cases ──
-        Task<ApiResponse<TestCaseResponse>> CreateTestCaseAsync(string actorUserId, string projectId, CreateTestCaseRequest request, CancellationToken token);
+        Task<ApiResponse<List<TestCaseResponse>>> CreateTestCasesAsync(string actorUserId, string projectId, List<CreateTestCaseRequest> request, CancellationToken token);
         Task<ApiResponse<object>> GenerateTestCase(string actorUserId, string projectId, GenerateTestCaseReq request, CancellationToken token);
         Task<ApiResponse<PagedTestCasesResponse>> GetTestCasesAsync(string actorUserId, string projectId, GetTestCasesQuery query, CancellationToken token);
         Task<ApiResponse<TestCaseResponse>> GetTestCaseByIdAsync(string actorUserId, string projectId, string testCaseId, CancellationToken token);
@@ -114,136 +114,146 @@ namespace BugTracker.Services.Services
         // CREATE TEST CASE
         // Testers and owners only.
         // ═══════════════════════════════════════════
-        public async Task<ApiResponse<TestCaseResponse>> CreateTestCaseAsync(
+        public async Task<ApiResponse<List<TestCaseResponse>>> CreateTestCasesAsync(
             string actorUserId,
             string projectId,
-            CreateTestCaseRequest request,
+            List<CreateTestCaseRequest> requests,
             CancellationToken token)
         {
             try
             {
                 if (!ObjectId.TryParse(actorUserId, out var actorObjId))
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid user ID format.");
 
                 if (!ObjectId.TryParse(projectId, out var projectObjId))
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid project ID format.");
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid project ID format.");
 
-                // 1. Validate priority
-                var priority = request.Priority.Trim().ToLowerInvariant();
-                if (!ValidPriorities.Contains(priority))
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
-                        $"Invalid priority. Allowed: {string.Join(", ", ValidPriorities)}.");
+                if (requests is null || requests.Count == 0)
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode, "At least one test case is required.");
 
-                // 2. Validate steps — must have at least one, all fields required per step
-                if (request.Steps is null || request.Steps.Count == 0)
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "At least one step is required.");
-
-                for (int i = 0; i < request.Steps.Count; i++)
-                {
-                    var s = request.Steps[i];
-                    if (string.IsNullOrWhiteSpace(s.Action))
-                        return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
-                            $"Step {i + 1}: action is required.");
-                    if (string.IsNullOrWhiteSpace(s.ExpectedOutcome))
-                        return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
-                            $"Step {i + 1}: expected outcome is required.");
-                }
-
-                // 3. Fetch project and verify it is active
+                // 1. Fetch project and do common validations
                 var project = await _db.Projects.Find(p => p.Id == projectId).FirstOrDefaultAsync(token);
                 if (project is null)
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.NoRecordReturned.ResponseCode, "Project not found.");
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.NoRecordReturned.ResponseCode, "Project not found.");
 
                 if (project.Status == ProjectStatus.Archived)
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode,
                         "Cannot create test cases in an archived project.");
 
-                // 4. Verify caller is tester or owner
+                // 2. Verify caller is tester or owner
                 var callerMember = project.Members.FirstOrDefault(m => m.UserId == actorUserId);
                 if (callerMember is null)
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.UnAuthorized.ResponseCode, "You are not a member of this project.");
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.UnAuthorized.ResponseCode, "You are not a member of this project.");
 
                 if (callerMember.Role is not (ProjectRole.Tester or ProjectRole.Owner))
-                    return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.UnAuthorized.ResponseCode,
+                    return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.UnAuthorized.ResponseCode,
                         "Only testers and owners can create test cases.");
 
-                // 5. Resolve optional assignee — must be tester or owner in the project
-                ProjectMember? assignedMember = null;
-                ObjectId? assignedObjId = null;
-
-                if (!string.IsNullOrWhiteSpace(request.AssignedToId))
-                {
-                    if (!ObjectId.TryParse(request.AssignedToId, out var assignedId))
-                        return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode, "Invalid assignedToId format.");
-
-                    assignedMember = project.Members.FirstOrDefault(m => m.UserId == actorUserId);
-                    if (assignedMember is null)
-                        return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.NoRecordReturned.ResponseCode,
-                            "The specified assignee is not a member of this project.");
-
-                    if (assignedMember.Role is not (ProjectRole.Tester or ProjectRole.Owner))
-                        return _responseHelper.Fail<TestCaseResponse>(ResponseCodes.InvalidEntryDetected.ResponseCode,
-                            "Test cases can only be assigned to testers or owners.");
-
-                    assignedObjId = assignedId;
-                }
-
-                // 6. Get next atomic case number
-                var caseNumber = await GetNextCaseNumberAsync(projectObjId, token);
-
-                // 7. Build steps — auto-assign stepNumber in order, ignore any client-sent numbers
-                var steps = request.Steps.Select((s, index) => new TestCaseStep
-                {
-                    StepNumber = index + 1,
-                    Action = s.Action.Trim(),
-                    ExpectedOutcome = s.ExpectedOutcome.Trim()
-                }).ToList();
-
+                // 3. Prepare result list and validate all requests first (fail fast on any invalid request)
+                var testCasesToInsert = new List<TestCase>();
+                var responses = new List<TestCaseResponse>();
                 var now = DateTime.UtcNow;
 
-                var testCase = new TestCase
+                for (int reqIndex = 0; reqIndex < requests.Count; reqIndex++)
                 {
-                    ProjectId = projectObjId,
-                    CaseNumber = caseNumber,
-                    Title = request.Title.Trim(),
-                    Description = request.Description?.Trim(),
-                    Preconditions = request.Preconditions?.Trim(),
-                    Steps = steps,
-                    ExpectedResult = request.ExpectedResult.Trim(),
-                    Priority = priority,
-                    Status = "draft",
-                    CreatedById = actorObjId,
-                    CreatedByName = callerMember.FullName,
-                    CreatedByEmail = callerMember.Email,
-                    AssignedToId = assignedObjId,
-                    AssignedToName = assignedMember?.FullName,
-                    AssignedToEmail = assignedMember?.Email,
-                    Tags = SanitiseTags(request.Tags),
-                    CreatedAt = now,
-                    UpdatedAt = now
-                };
+                    var request = requests[reqIndex];
 
-                await _db.TestCases.InsertOneAsync(testCase, cancellationToken: token);
+                    // Validate each request individually
+                    var validationError = ValidateCreateTestCaseRequest(request, reqIndex + 1);
+                    if (validationError != null)
+                        return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode, validationError);
 
-                await LogActivityAsync(
-                    projectId: projectObjId,
-                    actorId: actorObjId,
-                    actorName: callerMember.FullName,
-                    action: ActivityAction.TestCaseCreated,
-                    entityType: ActivityEntityType.TestCase,
-                    entityId: ObjectId.Parse(testCase.Id),
-                    entityTitle: $"TC-{caseNumber:D3}: {testCase.Title}",
-                    token: token);
+                    // Resolve optional assignee
+                    ProjectMember? assignedMember = null;
+                    ObjectId? assignedObjId = null;
 
-                Log.Information("Test case {CaseLabel} created in project {ProjectId} by user {UserId}.",
-                    $"TC-{caseNumber:D3}", projectId, actorUserId);
+                    if (!string.IsNullOrWhiteSpace(request.AssignedToId))
+                    {
+                        if (!ObjectId.TryParse(request.AssignedToId, out var assignedId))
+                            return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                                $"Test case {reqIndex + 1}: Invalid AssignedToId format.");
 
-                return _responseHelper.Ok(MapToTestCaseResponse(testCase));
+                        assignedMember = project.Members.FirstOrDefault(m => m.UserId == request.AssignedToId);
+                        if (assignedMember is null)
+                            return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.NoRecordReturned.ResponseCode,
+                                $"Test case {reqIndex + 1}: The specified assignee is not a member of this project.");
+
+                        if (assignedMember.Role is not (ProjectRole.Tester or ProjectRole.Owner))
+                            return _responseHelper.Fail<List<TestCaseResponse>>(ResponseCodes.InvalidEntryDetected.ResponseCode,
+                                $"Test case {reqIndex + 1}: Test cases can only be assigned to testers or owners.");
+
+                        assignedObjId = assignedId;
+                    }
+
+                    // Get next atomic case number
+                    var caseNumber = await GetNextCaseNumberAsync(projectObjId, token);
+
+                    // Build steps (auto-assign step numbers)
+                    var steps = request.Steps.Select((s, index) => new TestCaseStep
+                    {
+                        StepNumber = index + 1,
+                        Action = s.Action.Trim(),
+                        ExpectedOutcome = s.ExpectedOutcome.Trim()
+                    }).ToList();
+
+                    var testCase = new TestCase
+                    {
+                        ProjectId = projectObjId,
+                        CaseNumber = caseNumber,
+                        Title = request.Title.Trim(),
+                        Description = request.Description?.Trim(),
+                        Preconditions = request.Preconditions?.Trim(),
+                        Steps = steps,
+                        ExpectedResult = request.ExpectedResult.Trim(),
+                        Priority = request.Priority.Trim().ToLowerInvariant(),
+                        Status = "draft",
+                        CreatedById = actorObjId,
+                        CreatedByName = callerMember.FullName,
+                        CreatedByEmail = callerMember.Email,
+                        AssignedToId = assignedObjId,
+                        AssignedToName = assignedMember?.FullName,
+                        AssignedToEmail = assignedMember?.Email,
+                        Tags = SanitiseTags(request.Tags),
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    };
+
+                    testCasesToInsert.Add(testCase);
+                }
+
+                // 4. Bulk insert all test cases
+                if (testCasesToInsert.Count > 0)
+                {
+                    await _db.TestCases.InsertManyAsync(testCasesToInsert, cancellationToken: token);
+                }
+
+                // 5. Map to responses and log activities
+                foreach (var testCase in testCasesToInsert)
+                {
+                    var response = MapToTestCaseResponse(testCase);
+                    responses.Add(response);
+
+                    await LogActivityAsync(
+                        projectId: projectObjId,
+                        actorId: actorObjId,
+                        actorName: callerMember.FullName,
+                        action: ActivityAction.TestCaseCreated,
+                        entityType: ActivityEntityType.TestCase,
+                        entityId: ObjectId.Parse(testCase.Id),
+                        entityTitle: $"TC-{testCase.CaseNumber:D3}: {testCase.Title}",
+                        token: token);
+
+                    Log.Information("Test case {CaseLabel} created in project {ProjectId} by user {UserId}.",
+                        $"TC-{testCase.CaseNumber:D3}", projectId, actorUserId);
+                }
+
+                return _responseHelper.Ok(responses);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error creating test case in project {ProjectId} by user {UserId}.", projectId, actorUserId);
-                return _responseHelper.SystemError<TestCaseResponse>();
+                Log.Error(ex, "Error creating {Count} test cases in project {ProjectId} by user {UserId}.",
+                    requests?.Count ?? 0, projectId, actorUserId);
+                return _responseHelper.SystemError<List<TestCaseResponse>>();
             }
         }
 
@@ -1071,6 +1081,33 @@ namespace BugTracker.Services.Services
             };
             var result = await _db.Counters.FindOneAndUpdateAsync(filter, update, opts, token);
             return result.Seq;
+        }
+
+        private string? ValidateCreateTestCaseRequest(CreateTestCaseRequest request, int caseNumber)
+        {
+            if (string.IsNullOrWhiteSpace(request.Title))
+                return $"Test case {caseNumber}: Title is required.";
+
+            var priority = request.Priority?.Trim().ToLowerInvariant() ?? "";
+            if (!ValidPriorities.Contains(priority))
+                return $"Test case {caseNumber}: Invalid priority. Allowed: {string.Join(", ", ValidPriorities)}.";
+
+            if (request.Steps is null || request.Steps.Count == 0)
+                return $"Test case {caseNumber}: At least one step is required.";
+
+            for (int i = 0; i < request.Steps.Count; i++)
+            {
+                var s = request.Steps[i];
+                if (string.IsNullOrWhiteSpace(s.Action))
+                    return $"Test case {caseNumber}, Step {i + 1}: Action is required.";
+                if (string.IsNullOrWhiteSpace(s.ExpectedOutcome))
+                    return $"Test case {caseNumber}, Step {i + 1}: Expected outcome is required.";
+            }
+
+            if (string.IsNullOrWhiteSpace(request.ExpectedResult))
+                return $"Test case {caseNumber}: Expected result is required.";
+
+            return null;
         }
 
         private async Task<(Project? project, TestCase? testCase, string? memberError)> FetchProjectAndTestCaseAsync(

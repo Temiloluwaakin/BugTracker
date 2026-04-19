@@ -12,6 +12,12 @@ namespace BugTracker.Data.Models
         [Required(ErrorMessage = "Message content is required.")]
         [StringLength(2000, MinimumLength = 1)]
         public string Content { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional: ID of the message being replied to.
+        /// If provided, the server will validate the message
+        /// </summary>
+        public string? ReplyToId { get; set; }
     }
 
     public class EditDmRequest
@@ -98,6 +104,7 @@ namespace BugTracker.Data.Models
     {
         public string Id { get; set; } = string.Empty;
         public DmParticipantResponse OtherParticipant { get; set; } = new();
+        public DmParticipantResponse Sender { get; set; } = new();
         public string? LastMessageSnippet { get; set; }
         public DateTime? LastMessageAt { get; set; }
         public bool LastMessageIsMine { get; set; }
@@ -118,6 +125,7 @@ namespace BugTracker.Data.Models
         public string Content { get; set; } = string.Empty;
         public bool IsEdited { get; set; }
         public bool IsDeleted { get; set; }
+        public ReplyToResponse? ReplyTo { get; set; }
         public bool IsMine { get; set; }
         public DateTime SentAt { get; set; }
         public DateTime? EditedAt { get; set; }
